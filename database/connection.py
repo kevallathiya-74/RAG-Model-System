@@ -14,11 +14,14 @@ def load_env():
 
 def get_db_connection():
     load_env()
-    host = os.environ.get("POSTGRES_HOST", "localhost")
-    port = os.environ.get("POSTGRES_PORT", "5432")
-    dbname = os.environ.get("POSTGRES_DB", "RAG_System")
-    user = os.environ.get("POSTGRES_USER", "postgres")
-    password = os.environ.get("POSTGRES_PASSWORD", "123")
+    host = os.environ.get("POSTGRES_HOST")
+    port = os.environ.get("POSTGRES_PORT")
+    dbname = os.environ.get("POSTGRES_DB")
+    user = os.environ.get("POSTGRES_USER")
+    password = os.environ.get("POSTGRES_PASSWORD")
+    
+    if not all([host, port, dbname, user, password]):
+        raise ValueError("Missing PostgreSQL connection variables in environment or .env file.")
     
     try:
         conn = psycopg2.connect(
