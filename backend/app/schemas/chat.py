@@ -6,11 +6,17 @@ class ChatRequest(BaseModel):
 
 class Citation(BaseModel):
     source_id: str
-    chunk_id: str
+    chunk_id: Optional[str] = None
     source_type: str
-    filename: str
+    filename: Optional[str] = None
     page_number: Optional[int] = None
     image_id: Optional[str] = None
+    table: Optional[str] = None
+    query_type: Optional[str] = None
+    record_ids: Optional[List[str]] = None
+    fields: Optional[List[str]] = None
+    tenant_id: Optional[str] = None
+    authorized: Optional[bool] = None
 
 class ChatResponse(BaseModel):
     answer: str

@@ -25,3 +25,6 @@ class AuthenticatedUser(BaseModel):
     tenant_id: str
     department: Optional[str] = None
     is_active: bool = True
+    db_id: Optional[int] = None
+    employee_id: Optional[int] = None
+    employee_code: Optional[str] = None

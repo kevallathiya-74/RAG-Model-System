@@ -18,6 +18,9 @@ load_env()
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Secure Multi-Modal RAG System API"
     VERSION: str = "1.0.0"
+    DEBUG: bool = os.environ.get("DEBUG", "false").lower() in ("true", "1", "yes")
+    ENVIRONMENT: str = os.environ.get("ENVIRONMENT", "development")
+    ALLOWED_ORIGINS: list = [origin.strip() for origin in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173").split(",") if origin.strip()]
     
     JWT_SECRET_KEY: str = os.environ.get("JWT_SECRET_KEY", "secure_rag_super_secret_jwt_key_2026_change_in_prod")
     JWT_ALGORITHM: str = "HS256"
@@ -42,7 +45,16 @@ class Settings(BaseSettings):
     MAX_PDF_PAGES: int = int(os.environ.get("MAX_PDF_PAGES", 50))
     UPLOAD_DIR: str = os.path.join(BASE_DIR, "dataset", "uploads")
     ALLOWED_EXTENSIONS: set = {".pdf", ".png", ".jpg", ".jpeg"}
-    
+
+    # Rate Limiting configuration
+    RATE_LIMIT_ENABLED: bool = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in ("true", "1", "yes")
+    RATE_LIMIT_WINDOW_SECONDS: int = int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", 60))
+    RATE_LIMIT_LOGIN: int = int(os.environ.get("RATE_LIMIT_LOGIN", 10))
+    RATE_LIMIT_CHAT: int = int(os.environ.get("RATE_LIMIT_CHAT", 30))
+    RATE_LIMIT_UPLOAD: int = int(os.environ.get("RATE_LIMIT_UPLOAD", 10))
+    RATE_LIMIT_API: int = int(os.environ.get("RATE_LIMIT_API", 120))
+    RATE_LIMIT_ADMIN: int = int(os.environ.get("RATE_LIMIT_ADMIN", 60))
+
     class Config:
         extra = "ignore"
 

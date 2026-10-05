@@ -14,10 +14,14 @@ def get_user_by_id_or_username(identifier: str) -> Optional[Dict[str, Any]]:
         d.name as department_name,
         u.tenant_id,
         u.is_active,
-        u.password_hash
+        u.password_hash,
+        u.id as db_id,
+        u.employee_id as emp_fk,
+        e.employee_id as emp_code
     FROM users u
     JOIN roles r ON u.role_id = r.id
     LEFT JOIN departments d ON u.department_id = d.id
+    LEFT JOIN employees e ON u.employee_id = e.id
     WHERE u.user_id = %s OR LOWER(u.name) = LOWER(%s);
     """
     
@@ -27,7 +31,7 @@ def get_user_by_id_or_username(identifier: str) -> Optional[Dict[str, Any]]:
         if not row:
             return None
             
-        u_id, u_name, u_role, u_dept, u_tenant, u_active, u_pass = row
+        u_id, u_name, u_role, u_dept, u_tenant, u_active, u_pass, db_id, emp_fk, emp_code = row
         return {
             "user_id": u_id,
             "name": u_name,
@@ -35,7 +39,10 @@ def get_user_by_id_or_username(identifier: str) -> Optional[Dict[str, Any]]:
             "department": u_dept,
             "tenant_id": u_tenant,
             "is_active": u_active,
-            "password_hash": u_pass
+            "password_hash": u_pass,
+            "db_id": db_id,
+            "employee_id": emp_fk,
+            "employee_code": emp_code
         }
     finally:
         conn.close()

@@ -8,8 +8,17 @@ from scripts.secure_rag import get_qdrant_client
 
 router = APIRouter(prefix="/api", tags=["Health Checks"])
 
-@router.get("/health", response_model=HealthResponse, summary="Check API services status")
-def health_check(response: Response):
+@router.get("/health", response_model=HealthResponse, summary="Process liveness check")
+def health_check():
+    """Liveness probe: verifies FastAPI process is running and accepting HTTP requests."""
+    return HealthResponse(
+        status="healthy",
+        services={"api": "healthy"}
+    )
+
+@router.get("/health/ready", response_model=HealthResponse, summary="Check if API dependencies are ready")
+def readiness_check(response: Response):
+    """Readiness probe: verifies external dependencies (PostgreSQL, Qdrant, Ollama) are reachable."""
     services = {
         "database": "unknown",
         "qdrant": "unknown",
@@ -54,7 +63,3 @@ def health_check(response: Response):
         status="healthy" if all_healthy else "degraded",
         services=services
     )
-
-@router.get("/health/ready", response_model=HealthResponse, summary="Check if API is ready to accept requests")
-def readiness_check(response: Response):
-    return health_check(response)
