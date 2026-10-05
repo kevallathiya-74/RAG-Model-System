@@ -3,3 +3,7 @@
 __pycache__/
 *.pyc
 .venv311
+.agents
+dataset/uploads
+tests
+docs/adr
