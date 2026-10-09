@@ -1,14 +1,37 @@
+# Environment & secrets
 .env
+.env*
+env.txt
+
+# Databases & caches
 *.db
 __pycache__/
 *.pyc
-.venv311
+.pytest_cache/
+
+# Virtual environments
 .venv
 .venv/
+.venv311/
+
+# Local agent configurations & skills
 .agents
+.agents/
+
+# Datasets
 dataset
+dataset/
+
+# Tests & Scripts
+test
+test/
 tests
+tests/
+scripts
+scripts/
+
+# Docs & Frontend build artifacts
 docs/adr
 frontend/node_modules/
 frontend/dist/
-scripts
+
