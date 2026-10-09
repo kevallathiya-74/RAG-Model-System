@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS users (
     employee_id INT REFERENCES employees(id) ON DELETE SET NULL,
     tenant_id VARCHAR(50) NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    password_hash VARCHAR(255),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

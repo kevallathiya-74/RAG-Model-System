@@ -1,5 +1,5 @@
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -55,7 +55,6 @@ class Settings(BaseSettings):
     RATE_LIMIT_API: int = int(os.environ.get("RATE_LIMIT_API", 120))
     RATE_LIMIT_ADMIN: int = int(os.environ.get("RATE_LIMIT_ADMIN", 60))
 
-    class Config:
-        extra = "ignore"
+    model_config = SettingsConfigDict(extra="ignore")
 
 settings = Settings()

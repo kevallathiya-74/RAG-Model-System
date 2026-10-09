@@ -28,25 +28,19 @@ def get_allowed_columns_for_user(auth_ctx: Dict[str, Any], is_self: bool = False
     """
     Returns the allowlist of columns the user is permitted to view.
     """
-    role = auth_ctx.get("role", "employee")
+    role = auth_ctx.get("role", "student")
     
     # Self-access grants access to user's own data
     if is_self:
         return ALL_EMPLOYEE_COLUMNS.copy()
         
-    if role == "admin":
-        return ALL_EMPLOYEE_COLUMNS.copy()
-        
     if role == "finance_manager":
         return PUBLIC_COLUMNS | INTERNAL_COLUMNS | CONFIDENTIAL_FINANCIAL_COLUMNS
         
-    if role == "hr_manager":
+    if role == "faculty":
         return PUBLIC_COLUMNS | INTERNAL_COLUMNS | CONFIDENTIAL_HR_COLUMNS
         
-    if role == "engineering_manager":
-        return PUBLIC_COLUMNS | INTERNAL_COLUMNS
-        
-    # Regular employee querying other records: only public directory columns
+    # Student querying other records: only public directory columns
     return PUBLIC_COLUMNS.copy()
 
 
@@ -60,19 +54,19 @@ def is_field_authorized_for_aggregation(
     if not target_field or target_field == "*":
         return True
         
-    role = auth_ctx.get("role", "employee")
+    role = auth_ctx.get("role", "student")
     
-    # Salary aggregations only allowed for admin and finance_manager
+    # Salary aggregations only allowed for finance_manager
     if target_field in ("salary_amount", "salary_bonus"):
-        return role in ("admin", "finance_manager")
+        return role == "finance_manager"
         
-    # Confidential HR aggregations only allowed for admin and hr_manager
+    # Confidential HR aggregations allowed for faculty and finance_manager
     if target_field in CONFIDENTIAL_HR_COLUMNS:
-        return role in ("admin", "hr_manager")
+        return role in ("faculty", "finance_manager")
         
-    # Highly confidential fields cannot be aggregated
+    # Highly confidential fields restricted to finance_manager
     if target_field in HIGHLY_CONFIDENTIAL_COLUMNS:
-        return role == "admin"
+        return role == "finance_manager"
         
     return True
 
@@ -85,13 +79,11 @@ def build_row_authorization_clause(
     Builds the parameterized SQL predicate enforcing row-level access control.
     Enforces:
     1. Tenant isolation
-    2. Admin bypass within tenant
-    3. Employee self-match
-    4. Role-based employee_permissions
-    5. User-specific employee_permissions
+    2. Role-based permissions
+    3. User self-match
     """
     tenant_id = auth_ctx.get("tenant_id", "TENANT-001")
-    role = auth_ctx.get("role", "employee")
+    role = auth_ctx.get("role", "student")
     user_db_id = auth_ctx.get("db_id") or -1
     employee_pk = auth_ctx.get("employee_id") or -1
     
@@ -99,8 +91,7 @@ def build_row_authorization_clause(
         """
         {alias}.tenant_id = %s
         AND (
-            %s = 'admin'
-            OR (%s = 'employee' AND {alias}.id = %s)
+            {alias}.id = %s
             OR EXISTS (
                 SELECT 1 FROM employee_permissions ep
                 JOIN roles r ON ep.role_id = r.id
@@ -114,5 +105,5 @@ def build_row_authorization_clause(
         """
     ).format(alias=sql.Identifier(table_alias))
     
-    params = [tenant_id, role, role, employee_pk, role, user_db_id]
+    params = [tenant_id, employee_pk, role, user_db_id]
     return clause, params

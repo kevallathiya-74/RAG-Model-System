@@ -1,0 +1,255 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { chatApi } from '../api/client.js';
+import { Citations } from './Citations.jsx';
+
+export function Chat({ user }) {
+  const [question, setQuestion] = useState('');
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [errorBanner, setErrorBanner] = useState('');
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, loading]);
+
+  const handleSend = async (e) => {
+    e.preventDefault();
+    const query = question.trim();
+    if (!query || loading) {
+      return;
+    }
+
+    setErrorBanner('');
+    const userMessage = {
+      id: Date.now(),
+      sender: 'user',
+      text: query,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setQuestion('');
+    setLoading(true);
+
+    try {
+      const response = await chatApi(query);
+
+      const assistantMessage = {
+        id: Date.now() + 1,
+        sender: 'assistant',
+        text: response.answer,
+        citations: response.citations || [],
+        grounded: response.grounded,
+        retrievalCount: response.retrieval_count,
+        latencies: response.latencies || {},
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+    } catch (err) {
+      if (err.status === 401) {
+        setErrorBanner('Your session has expired. Please sign in again.');
+      } else if (err.status === 403) {
+        setErrorBanner('Access forbidden. You do not have authorization for this query.');
+      } else if (err.status === 429) {
+        setErrorBanner('Rate limit reached (30 queries/min). Please pause before sending another query.');
+      } else {
+        setErrorBanner(err.message || 'Error processing RAG query.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleClearChat = () => {
+    setMessages([]);
+    setErrorBanner('');
+  };
+
+  return (
+    <div className="chat-interface">
+      {errorBanner && (
+        <div className="alert-box alert-error" role="alert" aria-live="assertive">
+          <svg className="icon-small alert-icon" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path
+              fillRule="evenodd"
+              d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+              clipRule="evenodd"
+            />
+          </svg>
+          <span>{errorBanner}</span>
+          <button
+            type="button"
+            className="alert-dismiss"
+            onClick={() => setErrorBanner('')}
+            aria-label="Dismiss error"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <div className="chat-messages-area" role="log" aria-live="polite" aria-label="Conversation history">
+        {messages.length === 0 ? (
+          <div className="chat-empty-state">
+            <div className="empty-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+              </svg>
+            </div>
+            <h2>Secure Enterprise Assistant</h2>
+            <p>
+              Ask questions grounded in your authorized documents and database records.
+              Retrieval is filtered at the database and vector layers according to your role (
+              <strong>{user?.role || 'authorized user'}</strong>) and tenant.
+            </p>
+            <div className="sample-queries-list">
+              <span className="sample-label">Suggested Queries:</span>
+              <button
+                type="button"
+                className="sample-query-chip"
+                onClick={() => setQuestion('What are the company leave policies?')}
+              >
+                "What are the company leave policies?"
+              </button>
+              <button
+                type="button"
+                className="sample-query-chip"
+                onClick={() => setQuestion('Who are the managers in the HR department?')}
+              >
+                "Who are the managers in the HR department?"
+              </button>
+              <button
+                type="button"
+                className="sample-query-chip"
+                onClick={() => setQuestion('What is the remote work policy?')}
+              >
+                "What is the remote work policy?"
+              </button>
+            </div>
+          </div>
+        ) : (
+          messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`message-row ${msg.sender === 'user' ? 'row-user' : 'row-assistant'}`}
+            >
+              <div className={`message-bubble ${msg.sender === 'user' ? 'bubble-user' : 'bubble-assistant'}`}>
+                <div className="message-meta-header">
+                  <span className="message-sender-name">
+                    {msg.sender === 'user' ? (user?.name || 'You') : 'Secure RAG Agent'}
+                  </span>
+                  <span className="message-time">{msg.timestamp}</span>
+                </div>
+
+                <div className="message-body-text">{msg.text}</div>
+
+                {msg.sender === 'assistant' && (
+                  <div className="assistant-footer">
+                    <div className="grounding-status-bar">
+                      {msg.grounded ? (
+                        <span className="badge badge-success">
+                          <span className="status-dot dot-success" aria-hidden="true" />
+                          Grounded in Authorized Sources
+                        </span>
+                      ) : (
+                        <span className="badge badge-warning">
+                          <span className="status-dot dot-warning" aria-hidden="true" />
+                          Restricted / Safe Refusal
+                        </span>
+                      )}
+
+                      {msg.retrievalCount !== undefined && msg.retrievalCount > 0 && (
+                        <span className="badge badge-neutral">
+                          Retrieved Chunks: {msg.retrievalCount}
+                        </span>
+                      )}
+
+                      {msg.latencies?.total_sec !== undefined && (
+                        <span className="latency-text">
+                          {(msg.latencies.total_sec * 1000).toFixed(0)}ms
+                        </span>
+                      )}
+                    </div>
+
+                    <Citations citations={msg.citations} />
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+
+        {loading && (
+          <div className="message-row row-assistant">
+            <div className="message-bubble bubble-assistant bubble-loading">
+              <div className="typing-indicator" aria-label="Searching authorized sources and generating response">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <span className="loading-label">Retrieving authorized context & synthesizing answer...</span>
+            </div>
+          </div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      <div className="chat-input-container">
+        <form onSubmit={handleSend} className="chat-form">
+          <label htmlFor="chat-query-input" className="sr-only">
+            Ask a question
+          </label>
+          <input
+            id="chat-query-input"
+            type="text"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="Ask a question grounded in authorized documents & data..."
+            disabled={loading}
+            autoComplete="off"
+            className="chat-input"
+          />
+          <button
+            type="submit"
+            disabled={!question.trim() || loading}
+            className="btn btn-primary btn-send"
+            aria-label="Send question"
+          >
+            {loading ? (
+              <span className="spinner small-spinner" aria-hidden="true" />
+            ) : (
+              <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden="true">
+                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+              </svg>
+            )}
+          </button>
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearChat}
+              disabled={loading}
+              className="btn btn-secondary btn-icon-only"
+              title="Clear chat history"
+              aria-label="Clear chat history"
+            >
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                <path
+                  fillRule="evenodd"
+                  d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
+          )}
+        </form>
+      </div>
+    </div>
+  );
+}

@@ -1,8 +1,14 @@
 import os
+import sys
 import json
-from connection import get_db_connection
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from database.connection import get_db_connection
+from backend.app.auth.password import get_password_hash
+
 METADATA_DIR = os.path.join(BASE_DIR, "dataset", "metadata")
 SCHEMA_PATH = os.path.join(BASE_DIR, "database", "schema.sql")
 
@@ -17,28 +23,17 @@ def seed_postgresql():
     conn.autocommit = True
     cursor = conn.cursor()
 
-    # Drop existing tables to ensure clean seed
-    print("Resetting database schema...")
-    cursor.execute("""
-    DROP TABLE IF EXISTS audit_logs CASCADE;
-    DROP TABLE IF EXISTS employee_permissions CASCADE;
-    DROP TABLE IF EXISTS document_permissions CASCADE;
-    DROP TABLE IF EXISTS images CASCADE;
-    DROP TABLE IF EXISTS documents CASCADE;
-    DROP TABLE IF EXISTS users CASCADE;
-    DROP TABLE IF EXISTS employees CASCADE;
-    DROP TABLE IF EXISTS departments CASCADE;
-    DROP TABLE IF EXISTS roles CASCADE;
-    """)
-
-    # Apply schema.sql
+    # Apply schema.sql safely
     with open(SCHEMA_PATH, "r") as f:
         schema_sql = f.read()
     cursor.execute(schema_sql)
-    print("PostgreSQL Schema applied.")
+    cursor.execute("""
+    TRUNCATE TABLE audit_logs, document_permissions, employee_permissions, documents, images, users, employees, departments, roles CASCADE;
+    """)
+    print("PostgreSQL Base Schema & Tables truncated for clean seed.")
 
-    # 1. Seed Roles
-    roles = ["admin", "hr_manager", "finance_manager", "engineering_manager", "employee"]
+    # 1. Seed Roles (Exactly Three Canonical Roles)
+    roles = ["student", "faculty", "finance_manager"]
     role_map = {}
     for r in roles:
         cursor.execute("INSERT INTO roles (name, description) VALUES (%s, %s) RETURNING id;", (r, f"{r.replace('_', ' ').title()} Role"))
@@ -52,7 +47,7 @@ def seed_postgresql():
         dept_map[d] = cursor.fetchone()[0]
 
     # 3. Seed Employees
-    emp_list = load_jsonl("employees.jsonl")
+    emp_list = load_jsonl("employees.jsonl") if os.path.exists(os.path.join(METADATA_DIR, "employees.jsonl")) else []
     emp_db_map = {}
     for emp in emp_list:
         dept_id = dept_map[emp["department"]]
@@ -80,10 +75,11 @@ def seed_postgresql():
         role_id = role_map[u["role"]]
         dept_id = dept_map[u["department"]] if u.get("department") else None
         emp_fk = emp_db_map.get(u.get("employee_id")) if u.get("employee_id") else None
+        pwd_hash = get_password_hash(u.get("password", "Password123!"))
         cursor.execute("""
-        INSERT INTO users (user_id, name, role_id, department_id, employee_id, tenant_id)
-        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;
-        """, (u["user_id"], u["name"], role_id, dept_id, emp_fk, u.get("tenant_id", "TENANT-001")))
+        INSERT INTO users (user_id, name, role_id, department_id, employee_id, tenant_id, password_hash)
+        VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id;
+        """, (u["user_id"], u["name"], role_id, dept_id, emp_fk, u.get("tenant_id", "TENANT-001"), pwd_hash))
         user_map[u["user_id"]] = cursor.fetchone()[0]
 
     # 5. Seed Documents
@@ -99,7 +95,7 @@ def seed_postgresql():
         doc_map[doc["document_id"]] = cursor.fetchone()[0]
 
     # 6. Seed Images
-    img_list = load_jsonl("images.jsonl")
+    img_list = load_jsonl("images.jsonl") if os.path.exists(os.path.join(METADATA_DIR, "images.jsonl")) else []
     img_map = {}
     for img in img_list:
         dept_id = dept_map[img["department"]]

@@ -82,7 +82,7 @@ def get_embeddings_batch(texts: List[str]) -> List[List[float]]:
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 def run_paddle_ocr(image_path: str) -> List[Any]:
-    """Execute PaddleOCR extraction with fallback to .venv311 runtime."""
+    """Execute PaddleOCR extraction with delegation to isolated .venv311 runtime."""
     os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
     try:
         from paddleocr import PaddleOCR
@@ -90,9 +90,18 @@ def run_paddle_ocr(image_path: str) -> List[Any]:
         res = engine.ocr(image_path, cls=True)
         return res[0] if res and res[0] else []
     except Exception:
-        # Fallback to python in .venv311
-        venv_python = os.path.join(BASE_DIR, ".venv311", "Scripts", "python.exe")
-        if os.path.exists(venv_python):
+        # Fallback to isolated OCR environment (.venv311)
+        ocr_candidates = [
+            os.path.join(BASE_DIR, ".venv311", "Scripts", "python.exe"),
+            os.path.join(BASE_DIR, ".venv", "Scripts", "python.exe")
+        ]
+        venv_python = None
+        for candidate in ocr_candidates:
+            if candidate and os.path.exists(candidate) and candidate != sys.executable:
+                venv_python = candidate
+                break
+
+        if venv_python:
             img_path_json = json.dumps(image_path)
             script = f"""
 import os, sys, json
@@ -107,11 +116,15 @@ except Exception as e:
     sys.stderr.write(str(e))
     sys.exit(1)
 """
-            proc = subprocess.run([venv_python, "-c", script], capture_output=True, text=True, check=True)
-            for line in reversed(proc.stdout.strip().split("\n")):
-                if line.startswith("[") and line.endswith("]"):
-                    return json.loads(line)
-        return []
+            try:
+                proc = subprocess.run([venv_python, "-c", script], capture_output=True, text=True, check=True)
+                for line in reversed(proc.stdout.strip().split("\n")):
+                    if line.startswith("[") and line.endswith("]"):
+                        return json.loads(line)
+            except subprocess.SubprocessError as sub_err:
+                raise RuntimeError(f"OCR subprocess execution failed on {venv_python}: {sub_err}")
+
+        raise RuntimeError("PaddleOCR engine is not installed or available in .venv or .venv311.")
 
 def get_db_user_and_dept_ids(user_id: str) -> Tuple[int, Optional[int]]:
     conn = get_db_connection()
