@@ -55,6 +55,19 @@ def login(req: LoginRequest, request: Request):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated."
         )
+
+    if user_db.get("role") not in settings.CANONICAL_ROLES:
+        record_audit_event(
+            user_id=user_db["user_id"],
+            action="login_failure",
+            resource_type="auth",
+            result="denied",
+            metadata={"reason": "obsolete_or_invalid_role", "role": user_db.get("role"), "tenant_id": user_db.get("tenant_id"), "request_id": req_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account has an obsolete or unrecognized role. Contact administrator."
+        )
         
     pwd_hash = user_db.get("password_hash")
     if not pwd_hash or not verify_password(password, pwd_hash):

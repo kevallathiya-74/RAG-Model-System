@@ -173,11 +173,11 @@ export function Documents({ user }) {
                 type="text"
                 value={allowedRoles}
                 onChange={(e) => setAllowedRoles(e.target.value)}
-                placeholder="e.g. admin, hr_manager (leave blank for default)"
+                placeholder="e.g. faculty, finance_manager, admin (leave blank for default)"
                 disabled={uploading}
                 className="form-input"
               />
-              <span className="field-hint">Comma-separated roles allowed to access document</span>
+              <span className="field-hint">Comma-separated canonical roles allowed to access document</span>
             </div>
 
             <div className="form-group flex-1 form-action-align">

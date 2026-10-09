@@ -3,11 +3,13 @@ import { getStoredUser, clearAuth, onUnauthorized, getAuthToken } from './api/cl
 import { Login } from './components/Login.jsx';
 import { Chat } from './components/Chat.jsx';
 import { Documents } from './components/Documents.jsx';
+import { Admin } from './components/Admin.jsx';
 
 const formatRoleName = (role) => {
   if (role === 'student') return 'Student';
   if (role === 'faculty') return 'Faculty';
   if (role === 'finance_manager') return 'Finance Manager (Fee Collector)';
+  if (role === 'admin') return 'Administrator';
   return role;
 };
 
@@ -117,6 +119,24 @@ export default function App() {
             </svg>
             Authorized Documents
           </button>
+          {user.role === 'admin' && (
+            <button
+              type="button"
+              className={`tab-btn ${activeTab === 'admin' ? 'tab-btn-active' : ''}`}
+              onClick={() => setActiveTab('admin')}
+              aria-selected={activeTab === 'admin'}
+              role="tab"
+            >
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                <path
+                  fillRule="evenodd"
+                  d="M10 2a1 1 0 011 1v1.323l3.954 1.582 1.599-.8a1 1 0 011.342.447l1 2a1 1 0 01-.447 1.341l-1.599.8.535 4.238a1 1 0 01-.643 1.054l-2 1a1 1 0 01-1.342-.447L13 14.323V17a1 1 0 01-2 0v-2.677l-1.954 1.215a1 1 0 01-1.342.447l-2-1a1 1 0 01-.643-1.054l.535-4.238-1.599-.8a1 1 0 01-.447-1.341l1-2a1 1 0 011.342-.447l1.599.8L9 4.323V3a1 1 0 011-1z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              Admin Operations
+            </button>
+          )}
         </nav>
       )}
 
@@ -125,8 +145,10 @@ export default function App() {
           <Login onLoginSuccess={handleLoginSuccess} />
         ) : activeTab === 'chat' ? (
           <Chat user={user} />
-        ) : (
+        ) : activeTab === 'documents' ? (
           <Documents user={user} />
+        ) : (
+          <Admin user={user} />
         )}
       </main>
 

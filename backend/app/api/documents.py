@@ -39,7 +39,7 @@ def parse_string_list(param: Optional[str]) -> Optional[List[str]]:
     description="Uploads a PDF or image file, performs page-aware extraction/OCR, chunks text, generates embeddings via Ollama, and indexes vector points with retrieval-layer ACL into Qdrant Cloud. Immediate querying supported.",
     dependencies=[Depends(rate_limit_upload)]
 )
-async def upload_document(
+def upload_document(
     request: Request,
     file: UploadFile = File(..., description="PDF, PNG, JPG, or JPEG file to ingest"),
     allowed_roles: Optional[str] = Form(None, description="Optional roles authorized to read document (JSON array or comma-separated)"),
@@ -48,12 +48,27 @@ async def upload_document(
     current_user: AuthenticatedUser = Depends(get_current_user)
 ):
     req_id = get_request_id(request)
+
+    # Restrict uploads: students cannot upload protected institutional documents
+    if current_user.role == "student":
+        record_audit_event(
+            user_id=current_user.user_id,
+            action="authorization_denied",
+            resource_type="document_upload",
+            result="denied",
+            metadata={"reason": "student_upload_prohibited", "tenant_id": current_user.tenant_id, "request_id": req_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Student accounts are not authorized to upload documents."
+        )
+
     roles_list = parse_string_list(allowed_roles)
     users_list = parse_string_list(allowed_users)
 
     # Read binary stream
     try:
-        file_bytes = await file.read()
+        file_bytes = file.file.read()
     except Exception as e:
         record_audit_event(
             user_id=current_user.user_id,

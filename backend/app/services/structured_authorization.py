@@ -27,6 +27,12 @@ ALL_EMPLOYEE_COLUMNS: Set[str] = (
 def get_allowed_columns_for_user(auth_ctx: Dict[str, Any], is_self: bool = False) -> Set[str]:
     """
     Returns the allowlist of columns the user is permitted to view.
+    Enforces strict least privilege across all four canonical roles:
+    - student: public directory columns only (unless self-access)
+    - faculty: public, internal, and academic/HR columns
+    - finance_manager: public, internal, and financial compensation columns
+    - admin: public and internal operational columns (administrative role does not
+             automatically expose private salaries or student personal PII without explicit grants)
     """
     role = auth_ctx.get("role", "student")
     
@@ -39,6 +45,9 @@ def get_allowed_columns_for_user(auth_ctx: Dict[str, Any], is_self: bool = False
         
     if role == "faculty":
         return PUBLIC_COLUMNS | INTERNAL_COLUMNS | CONFIDENTIAL_HR_COLUMNS
+
+    if role == "admin":
+        return PUBLIC_COLUMNS | INTERNAL_COLUMNS
         
     # Student querying other records: only public directory columns
     return PUBLIC_COLUMNS.copy()

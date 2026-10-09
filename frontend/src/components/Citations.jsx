@@ -65,6 +65,13 @@ export function Citations({ citations }) {
                   </div>
                 )}
 
+                {c.image_id && (
+                  <div className="meta-item">
+                    <span className="meta-label">Image ID:</span>
+                    <span className="meta-value">{c.image_id}</span>
+                  </div>
+                )}
+
                 {c.table && (
                   <div className="meta-item">
                     <span className="meta-label">Table:</span>

@@ -62,6 +62,11 @@ CREATE TABLE IF NOT EXISTS documents (
     owner_user_id INT REFERENCES users(id) ON DELETE SET NULL,
     tenant_id VARCHAR(50) NOT NULL,
     sensitivity VARCHAR(50) NOT NULL DEFAULT 'internal',
+    content_hash VARCHAR(64),
+    file_size BIGINT,
+    mime_type VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'completed',
+    chunk_count INT NOT NULL DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -84,6 +89,20 @@ CREATE TABLE IF NOT EXISTS images (
     owner_user_id INT REFERENCES users(id) ON DELETE SET NULL,
     tenant_id VARCHAR(50) NOT NULL,
     sensitivity VARCHAR(50) NOT NULL DEFAULT 'confidential',
+    content_hash VARCHAR(64),
+    file_size BIGINT,
+    mime_type VARCHAR(100),
+    status VARCHAR(20) NOT NULL DEFAULT 'completed',
+    chunk_count INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS image_permissions (
+    id SERIAL PRIMARY KEY,
+    image_id INT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    role_id INT REFERENCES roles(id) ON DELETE CASCADE,
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    permission VARCHAR(20) NOT NULL DEFAULT 'read' CHECK (permission = 'read'),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -94,6 +113,15 @@ CREATE TABLE IF NOT EXISTS employee_permissions (
     user_id INT REFERENCES users(id) ON DELETE CASCADE,
     permission VARCHAR(20) NOT NULL DEFAULT 'read' CHECK (permission = 'read'),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS fee_collector_assignments (
+    id SERIAL PRIMARY KEY,
+    user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    receipt_id VARCHAR(50) NOT NULL,
+    tenant_id VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_user_receipt UNIQUE (user_id, receipt_id)
 );
 
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -113,6 +141,9 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_users_user_id ON users(user_id);
 CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_users_role_id ON users(role_id);
+CREATE INDEX IF NOT EXISTS idx_fc_assign_user ON fee_collector_assignments(user_id);
+CREATE INDEX IF NOT EXISTS idx_fc_assign_receipt ON fee_collector_assignments(receipt_id);
+CREATE INDEX IF NOT EXISTS idx_fc_assign_tenant ON fee_collector_assignments(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_users_dept_id ON users(department_id);
 
 CREATE INDEX IF NOT EXISTS idx_employees_emp_id ON employees(employee_id);
@@ -123,15 +154,28 @@ CREATE INDEX IF NOT EXISTS idx_employees_manager_id ON employees(manager_id);
 CREATE INDEX IF NOT EXISTS idx_documents_doc_id ON documents(document_id);
 CREATE INDEX IF NOT EXISTS idx_documents_tenant_id ON documents(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_documents_dept_id ON documents(department_id);
+CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(content_hash);
 
 CREATE INDEX IF NOT EXISTS idx_images_img_id ON images(image_id);
 CREATE INDEX IF NOT EXISTS idx_images_tenant_id ON images(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_images_dept_id ON images(department_id);
+CREATE INDEX IF NOT EXISTS idx_images_content_hash ON images(content_hash);
 
 CREATE INDEX IF NOT EXISTS idx_doc_perm_doc_id ON document_permissions(document_id);
 CREATE INDEX IF NOT EXISTS idx_doc_perm_role_id ON document_permissions(role_id);
+CREATE INDEX IF NOT EXISTS idx_doc_perm_user_id ON document_permissions(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_perm_role ON document_permissions (document_id, role_id) WHERE user_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_doc_perm_user ON document_permissions (document_id, user_id) WHERE role_id IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_img_perm_img_id ON image_permissions(image_id);
+CREATE INDEX IF NOT EXISTS idx_img_perm_role_id ON image_permissions(role_id);
+CREATE INDEX IF NOT EXISTS idx_img_perm_user_id ON image_permissions(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_img_perm_role ON image_permissions (image_id, role_id) WHERE user_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_img_perm_user ON image_permissions (image_id, user_id) WHERE role_id IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_emp_perm_emp_id ON employee_permissions(employee_id);
 CREATE INDEX IF NOT EXISTS idx_emp_perm_role_id ON employee_permissions(role_id);
+CREATE INDEX IF NOT EXISTS idx_emp_perm_user_id ON employee_permissions(user_id);
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);

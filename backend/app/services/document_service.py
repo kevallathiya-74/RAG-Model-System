@@ -138,6 +138,13 @@ def get_db_user_and_dept_ids(user_id: str) -> Tuple[int, Optional[int]]:
     finally:
         conn.close()
 
+def check_table_exists(cur, table_name: str) -> bool:
+    try:
+        cur.execute("SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = %s LIMIT 1;", (table_name,))
+        return cur.fetchone() is not None
+    except Exception:
+        return False
+
 def find_duplicate_document(content_hash: str, tenant_id: str, is_image: bool) -> Optional[Dict[str, Any]]:
     table = "images" if is_image else "documents"
     id_col = "image_id" if is_image else "document_id"
@@ -195,6 +202,23 @@ def ingest_document(
     is_image = ext in {".png", ".jpg", ".jpeg"}
     source_type = "image" if is_image else "pdf"
 
+    # Format magic bytes validation (corrupted or spoofed file detection)
+    if ext == ".pdf" and not file_bytes.startswith(b"%PDF-"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Corrupted or invalid PDF document: missing '%PDF-' file signature."
+        )
+    if ext == ".png" and not file_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Corrupted or invalid PNG image: missing PNG file signature."
+        )
+    if ext in (".jpg", ".jpeg") and not file_bytes.startswith(b"\xff\xd8\xff"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Corrupted or invalid JPEG image: missing JPEG SOI file signature."
+        )
+
     # 2. SHA-256 Content Hash & Duplicate Detection
     content_hash = hashlib.sha256(file_bytes).hexdigest()
     existing = find_duplicate_document(content_hash, current_user.tenant_id, is_image)
@@ -214,9 +238,13 @@ def ingest_document(
     # Resolve DB User & Department
     user_db_id, dept_id = get_db_user_and_dept_ids(current_user.user_id)
 
-    # Default ACL: uploader + admin
-    roles_acl = set(allowed_roles or [])
-    roles_acl.add("admin")
+    # Validate and filter allowed roles against canonical role model
+    roles_acl = set()
+    if allowed_roles:
+        for r in allowed_roles:
+            clean_r = str(r).strip().lower()
+            if clean_r in settings.CANONICAL_ROLES:
+                roles_acl.add(clean_r)
     roles_acl.add(current_user.role)
     roles_acl = sorted(list(roles_acl))
 
@@ -229,6 +257,8 @@ def ingest_document(
     cur = conn.cursor()
     table = "images" if is_image else "documents"
     id_col = "image_id" if is_image else "document_id"
+    perm_table = "image_permissions" if is_image else "document_permissions"
+    fk_col = "image_id" if is_image else "document_id"
 
     try:
         insert_query = f"""
@@ -244,23 +274,37 @@ def ingest_document(
         ))
         db_record_id = cur.fetchone()[0]
 
-        # Insert permissions for PDF documents
-        if not is_image:
+        # Insert permissions for documents or images (if perm_table exists in DB)
+        if check_table_exists(cur, perm_table):
             for r in roles_acl:
                 cur.execute("SELECT id FROM roles WHERE name = %s;", (r,))
                 r_row = cur.fetchone()
                 if r_row:
                     cur.execute(
-                        "INSERT INTO document_permissions (document_id, role_id, permission) VALUES (%s, %s, 'read');",
-                        (db_record_id, r_row[0])
+                        f"""
+                        INSERT INTO {perm_table} ({fk_col}, role_id, permission)
+                        SELECT %s, %s, 'read'
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM {perm_table}
+                            WHERE {fk_col} = %s AND role_id = %s AND user_id IS NULL
+                        );
+                        """,
+                        (db_record_id, r_row[0], db_record_id, r_row[0])
                     )
             for u in users_acl:
                 cur.execute("SELECT id FROM users WHERE user_id = %s;", (u,))
                 u_row = cur.fetchone()
                 if u_row:
                     cur.execute(
-                        "INSERT INTO document_permissions (document_id, user_id, permission) VALUES (%s, %s, 'read');",
-                        (db_record_id, u_row[0])
+                        f"""
+                        INSERT INTO {perm_table} ({fk_col}, user_id, permission)
+                        SELECT %s, %s, 'read'
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM {perm_table}
+                            WHERE {fk_col} = %s AND user_id = %s AND role_id IS NULL
+                        );
+                        """,
+                        (db_record_id, u_row[0], db_record_id, u_row[0])
                     )
         conn.commit()
     except Exception as e:
@@ -291,7 +335,7 @@ def ingest_document(
                 if not cleaned:
                     continue
                 
-                page_chunks = chunk_text_tokens(cleaned, chunk_size=500, overlap=75)
+                page_chunks = chunk_text_tokens(cleaned, chunk_size=settings.CHUNK_SIZE, overlap=settings.CHUNK_OVERLAP)
                 for c_idx, c_text in enumerate(page_chunks, 1):
                     chunk_id = f"{doc_id}-P{page_num:03d}-C{c_idx:03d}"
                     chunks.append({
@@ -335,7 +379,7 @@ def ingest_document(
             if not full_ocr_text.strip():
                 raise ValueError("No extractable text found in uploaded image.")
 
-            text_chunks = chunk_text_tokens(full_ocr_text, chunk_size=500, overlap=75)
+            text_chunks = chunk_text_tokens(full_ocr_text, chunk_size=settings.CHUNK_SIZE, overlap=settings.CHUNK_OVERLAP)
             for c_idx, c_txt in enumerate(text_chunks, 1):
                 chunk_id = f"{doc_id}-C{c_idx:03d}"
                 chunks.append({
@@ -352,6 +396,7 @@ def ingest_document(
                     "citation": {
                         "source_type": "image",
                         "source_id": doc_id,
+                        "image_id": doc_id,
                         "filename": clean_name,
                         "page_number": None,
                         "chunk_index": c_idx,
@@ -414,8 +459,6 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        # Determine accessible documents for current user
-        is_admin = current_user.role == "admin"
         query = """
         SELECT 
             d.document_id, d.filename, d.source_type, d.tenant_id, d.status, d.chunk_count, d.created_at
@@ -426,8 +469,7 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
         LEFT JOIN users owner ON d.owner_user_id = owner.id
         WHERE d.tenant_id = %s
           AND (
-              %s = TRUE
-              OR owner.user_id = %s
+              owner.user_id = %s
               OR r.name = %s
               OR u.user_id = %s
           )
@@ -436,7 +478,6 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
         """
         cur.execute(query, (
             current_user.tenant_id,
-            is_admin,
             current_user.user_id,
             current_user.role,
             current_user.user_id
@@ -454,27 +495,51 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
             for r in cur.fetchall()
         ]
 
-        # Also retrieve accessible images
-        img_query = """
-        SELECT 
-            i.image_id, i.filename, i.source_type, i.tenant_id, i.status, i.chunk_count, i.created_at
-        FROM images i
-        LEFT JOIN users owner ON i.owner_user_id = owner.id
-        LEFT JOIN departments dep ON i.department_id = dep.id
-        WHERE i.tenant_id = %s
-          AND (
-              %s = TRUE
-              OR owner.user_id = %s
-              OR dep.name = %s
-          )
-        ORDER BY i.created_at DESC;
-        """
-        cur.execute(img_query, (
-            current_user.tenant_id,
-            is_admin,
-            current_user.user_id,
-            current_user.department
-        ))
+        # Also retrieve accessible images enforcing owner, role, and user ACLs
+        if check_table_exists(cur, "image_permissions"):
+            img_query = """
+            SELECT 
+                i.image_id, i.filename, i.source_type, i.tenant_id, i.status, i.chunk_count, i.created_at
+            FROM images i
+            LEFT JOIN image_permissions ip ON i.id = ip.image_id
+            LEFT JOIN roles r ON ip.role_id = r.id
+            LEFT JOIN users u ON ip.user_id = u.id
+            LEFT JOIN users owner ON i.owner_user_id = owner.id
+            WHERE i.tenant_id = %s
+              AND (
+                  owner.user_id = %s
+                  OR r.name = %s
+                  OR u.user_id = %s
+              )
+            GROUP BY i.id
+            ORDER BY i.created_at DESC;
+            """
+            cur.execute(img_query, (
+                current_user.tenant_id,
+                current_user.user_id,
+                current_user.role,
+                current_user.user_id
+            ))
+        else:
+            # Fallback when image_permissions is pending migration 004
+            img_query = """
+            SELECT 
+                i.image_id, i.filename, i.source_type, i.tenant_id, i.status, i.chunk_count, i.created_at
+            FROM images i
+            LEFT JOIN users owner ON i.owner_user_id = owner.id
+            WHERE i.tenant_id = %s
+              AND (
+                  owner.user_id = %s
+                  OR %s IN ('finance_manager', 'admin')
+              )
+            GROUP BY i.id
+            ORDER BY i.created_at DESC;
+            """
+            cur.execute(img_query, (
+                current_user.tenant_id,
+                current_user.user_id,
+                current_user.role
+            ))
         for r in cur.fetchall():
             docs.append({
                 "document_id": r[0],
@@ -494,29 +559,54 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        is_admin = current_user.role == "admin"
         if document_id.startswith("IMG-"):
-            query = """
-            SELECT 
-                i.image_id, i.filename, i.source_type, i.tenant_id, dep.name, i.sensitivity,
-                i.status, i.chunk_count, i.file_size, i.content_hash, i.created_at
-            FROM images i
-            LEFT JOIN users owner ON i.owner_user_id = owner.id
-            LEFT JOIN departments dep ON i.department_id = dep.id
-            WHERE i.image_id = %s AND i.tenant_id = %s
-              AND (
-                  %s = TRUE
-                  OR owner.user_id = %s
-                  OR dep.name = %s
-              );
-            """
-            cur.execute(query, (
-                document_id,
-                current_user.tenant_id,
-                is_admin,
-                current_user.user_id,
-                current_user.department
-            ))
+            if check_table_exists(cur, "image_permissions"):
+                query = """
+                SELECT 
+                    i.image_id, i.filename, i.source_type, i.tenant_id, dep.name, i.sensitivity,
+                    i.status, i.chunk_count, i.file_size, i.content_hash, i.created_at
+                FROM images i
+                LEFT JOIN departments dep ON i.department_id = dep.id
+                LEFT JOIN image_permissions ip ON i.id = ip.image_id
+                LEFT JOIN roles r ON ip.role_id = r.id
+                LEFT JOIN users u ON ip.user_id = u.id
+                LEFT JOIN users owner ON i.owner_user_id = owner.id
+                WHERE i.image_id = %s AND i.tenant_id = %s
+                  AND (
+                      owner.user_id = %s
+                      OR r.name = %s
+                      OR u.user_id = %s
+                  )
+                GROUP BY i.id, dep.name;
+                """
+                cur.execute(query, (
+                    document_id,
+                    current_user.tenant_id,
+                    current_user.user_id,
+                    current_user.role,
+                    current_user.user_id
+                ))
+            else:
+                query = """
+                SELECT 
+                    i.image_id, i.filename, i.source_type, i.tenant_id, dep.name, i.sensitivity,
+                    i.status, i.chunk_count, i.file_size, i.content_hash, i.created_at
+                FROM images i
+                LEFT JOIN departments dep ON i.department_id = dep.id
+                LEFT JOIN users owner ON i.owner_user_id = owner.id
+                WHERE i.image_id = %s AND i.tenant_id = %s
+                  AND (
+                      owner.user_id = %s
+                      OR %s IN ('finance_manager', 'admin')
+                  )
+                GROUP BY i.id, dep.name;
+                """
+                cur.execute(query, (
+                    document_id,
+                    current_user.tenant_id,
+                    current_user.user_id,
+                    current_user.role
+                ))
         else:
             query = """
             SELECT 
@@ -530,8 +620,7 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
             LEFT JOIN users owner ON d.owner_user_id = owner.id
             WHERE d.document_id = %s AND d.tenant_id = %s
               AND (
-                  %s = TRUE
-                  OR owner.user_id = %s
+                  owner.user_id = %s
                   OR r.name = %s
                   OR u.user_id = %s
               )
@@ -540,7 +629,6 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
             cur.execute(query, (
                 document_id,
                 current_user.tenant_id,
-                is_admin,
                 current_user.user_id,
                 current_user.role,
                 current_user.user_id

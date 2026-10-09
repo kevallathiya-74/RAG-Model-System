@@ -79,7 +79,22 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is deactivated."
         )
-        
+
+    user_role = db_user.get("role")
+    from backend.app.config import settings
+    if user_role not in settings.CANONICAL_ROLES:
+        record_audit_event(
+            user_id=db_user["user_id"],
+            action="authorization_denied",
+            resource_type="auth",
+            result="denied",
+            metadata={"reason": "invalid_or_obsolete_role", "role": user_role, "request_id": req_id}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account has an obsolete or unrecognized role. Contact administrator."
+        )
+
     return AuthenticatedUser(
         user_id=db_user["user_id"],
         name=db_user["name"],
@@ -91,3 +106,30 @@ def get_current_user(
         employee_id=db_user.get("employee_id"),
         employee_code=db_user.get("employee_code")
     )
+
+
+def require_admin_user(
+    request: Request,
+    current_user: AuthenticatedUser = Depends(get_current_user)
+) -> AuthenticatedUser:
+    """Enforces authoritative Administrator role requirement on protected admin endpoints."""
+    if current_user.role != "admin":
+        req_id = get_request_id(request)
+        record_audit_event(
+            user_id=current_user.user_id,
+            action="authorization_denied",
+            resource_type="admin",
+            result="denied",
+            metadata={
+                "reason": "admin_role_required",
+                "attempted_role": current_user.role,
+                "tenant_id": current_user.tenant_id,
+                "request_id": req_id
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Administrator authorization required."
+        )
+    return current_user
+

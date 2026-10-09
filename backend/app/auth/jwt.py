@@ -20,12 +20,16 @@ def create_access_token(user_id: str, role: str, tenant_id: str, department: Opt
     return token
 
 def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
+    if not token or not isinstance(token, str):
+        return None
     try:
         payload = jwt.decode(
             token,
             settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM]
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"require": ["sub", "exp", "iat"]}
         )
         return payload
     except Exception:
         return None
+

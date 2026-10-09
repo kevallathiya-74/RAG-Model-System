@@ -186,3 +186,50 @@ export async function checkHealthApi() {
     method: 'GET'
   });
 }
+
+// Administrative API Methods
+export async function getAdminAuditLogsApi({ page = 1, pageSize = 20, action = null, result = null } = {}) {
+  const params = new URLSearchParams();
+  if (page) params.append('page', page);
+  if (pageSize) params.append('page_size', pageSize);
+  if (action) params.append('action', action);
+  if (result) params.append('result', result);
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return apiRequest(`/api/admin/audit${qs}`, {
+    method: 'GET'
+  });
+}
+
+export async function getAdminUsersApi() {
+  return apiRequest('/api/admin/users', {
+    method: 'GET'
+  });
+}
+
+export async function updateAdminUserStatusApi(userId, isActive) {
+  return apiRequest(`/api/admin/users/${encodeURIComponent(userId)}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ is_active: isActive })
+  });
+}
+
+export async function updateAdminUserRoleApi(userId, role) {
+  return apiRequest(`/api/admin/users/${encodeURIComponent(userId)}/role`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role })
+  });
+}
+
+export async function getAdminDocumentsApi() {
+  return apiRequest('/api/admin/documents', {
+    method: 'GET'
+  });
+}
+
+export async function grantDocumentPermissionApi(documentId, { targetRole, targetUserId }) {
+  return apiRequest(`/api/admin/documents/${encodeURIComponent(documentId)}/permissions`, {
+    method: 'POST',
+    body: JSON.stringify({ target_role: targetRole || null, target_user_id: targetUserId || null })
+  });
+}
+

@@ -43,8 +43,12 @@ class Settings(BaseSettings):
     # Upload & Ingestion settings
     MAX_UPLOAD_SIZE_MB: int = int(os.environ.get("MAX_UPLOAD_SIZE_MB", 20))
     MAX_PDF_PAGES: int = int(os.environ.get("MAX_PDF_PAGES", 50))
+    CHUNK_SIZE: int = int(os.environ.get("CHUNK_SIZE", 500))
+    CHUNK_OVERLAP: int = int(os.environ.get("CHUNK_OVERLAP", 75))
     UPLOAD_DIR: str = os.path.join(BASE_DIR, "dataset", "uploads")
     ALLOWED_EXTENSIONS: set = {".pdf", ".png", ".jpg", ".jpeg"}
+
+    CANONICAL_ROLES: tuple = ("student", "faculty", "finance_manager", "admin")
 
     # Rate Limiting configuration
     RATE_LIMIT_ENABLED: bool = os.environ.get("RATE_LIMIT_ENABLED", "true").lower() in ("true", "1", "yes")
@@ -56,5 +60,13 @@ class Settings(BaseSettings):
     RATE_LIMIT_ADMIN: int = int(os.environ.get("RATE_LIMIT_ADMIN", 60))
 
     model_config = SettingsConfigDict(extra="ignore")
+
+    def model_post_init(self, __context):
+        super().model_post_init(__context)
+        if self.ENVIRONMENT.lower() == "production":
+            if self.JWT_SECRET_KEY == "secure_rag_super_secret_jwt_key_2026_change_in_prod" or len(self.JWT_SECRET_KEY) < 32:
+                raise ValueError("CRITICAL SECURITY VIOLATION: JWT_SECRET_KEY must be configured with at least 32 characters in production.")
+            if self.POSTGRES_PASSWORD in ("postgres", "123", ""):
+                raise ValueError("CRITICAL SECURITY VIOLATION: Insecure default POSTGRES_PASSWORD detected in production.")
 
 settings = Settings()
