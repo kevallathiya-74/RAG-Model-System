@@ -470,16 +470,18 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
         WHERE d.tenant_id = %s
           AND (
               owner.user_id = %s
-              OR r.name = %s
+              OR (r.name = %s AND %s = FALSE)
               OR u.user_id = %s
           )
         GROUP BY d.id
         ORDER BY d.created_at DESC;
         """
+        is_fee_collector = current_user.user_id.startswith("U_FC_") or current_user.user_id.startswith("FC-")
         cur.execute(query, (
             current_user.tenant_id,
             current_user.user_id,
             current_user.role,
+            is_fee_collector,
             current_user.user_id
         ))
         docs = [
@@ -496,6 +498,7 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
         ]
 
         # Also retrieve accessible images enforcing owner, role, and user ACLs
+        is_fee_collector = current_user.user_id.startswith("U_FC_") or current_user.user_id.startswith("FC-")
         if check_table_exists(cur, "image_permissions"):
             img_query = """
             SELECT 
@@ -508,7 +511,7 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
             WHERE i.tenant_id = %s
               AND (
                   owner.user_id = %s
-                  OR r.name = %s
+                  OR (r.name = %s AND %s = FALSE)
                   OR u.user_id = %s
               )
             GROUP BY i.id
@@ -518,27 +521,24 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
                 current_user.tenant_id,
                 current_user.user_id,
                 current_user.role,
+                is_fee_collector,
                 current_user.user_id
             ))
         else:
-            # Fallback when image_permissions is pending migration 004
+            # Fallback when image_permissions is pending migration 004: strictly deny-by-default for non-owners
             img_query = """
             SELECT 
                 i.image_id, i.filename, i.source_type, i.tenant_id, i.status, i.chunk_count, i.created_at
             FROM images i
             LEFT JOIN users owner ON i.owner_user_id = owner.id
             WHERE i.tenant_id = %s
-              AND (
-                  owner.user_id = %s
-                  OR %s IN ('finance_manager', 'admin')
-              )
+              AND owner.user_id = %s
             GROUP BY i.id
             ORDER BY i.created_at DESC;
             """
             cur.execute(img_query, (
                 current_user.tenant_id,
-                current_user.user_id,
-                current_user.role
+                current_user.user_id
             ))
         for r in cur.fetchall():
             docs.append({
@@ -560,6 +560,7 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
     cur = conn.cursor()
     try:
         if document_id.startswith("IMG-"):
+            is_fee_collector = current_user.user_id.startswith("U_FC_") or current_user.user_id.startswith("FC-")
             if check_table_exists(cur, "image_permissions"):
                 query = """
                 SELECT 
@@ -574,7 +575,7 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
                 WHERE i.image_id = %s AND i.tenant_id = %s
                   AND (
                       owner.user_id = %s
-                      OR r.name = %s
+                      OR (r.name = %s AND %s = FALSE)
                       OR u.user_id = %s
                   )
                 GROUP BY i.id, dep.name;
@@ -584,9 +585,11 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
                     current_user.tenant_id,
                     current_user.user_id,
                     current_user.role,
+                    is_fee_collector,
                     current_user.user_id
                 ))
             else:
+                # Fallback when image_permissions is pending migration 004: strictly deny-by-default for non-owners
                 query = """
                 SELECT 
                     i.image_id, i.filename, i.source_type, i.tenant_id, dep.name, i.sensitivity,
@@ -595,17 +598,13 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
                 LEFT JOIN departments dep ON i.department_id = dep.id
                 LEFT JOIN users owner ON i.owner_user_id = owner.id
                 WHERE i.image_id = %s AND i.tenant_id = %s
-                  AND (
-                      owner.user_id = %s
-                      OR %s IN ('finance_manager', 'admin')
-                  )
+                  AND owner.user_id = %s
                 GROUP BY i.id, dep.name;
                 """
                 cur.execute(query, (
                     document_id,
                     current_user.tenant_id,
-                    current_user.user_id,
-                    current_user.role
+                    current_user.user_id
                 ))
         else:
             query = """
@@ -621,16 +620,18 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
             WHERE d.document_id = %s AND d.tenant_id = %s
               AND (
                   owner.user_id = %s
-                  OR r.name = %s
+                  OR (r.name = %s AND %s = FALSE)
                   OR u.user_id = %s
               )
             GROUP BY d.id, dep.name;
             """
+            is_fee_collector = current_user.user_id.startswith("U_FC_") or current_user.user_id.startswith("FC-")
             cur.execute(query, (
                 document_id,
                 current_user.tenant_id,
                 current_user.user_id,
                 current_user.role,
+                is_fee_collector,
                 current_user.user_id
             ))
         

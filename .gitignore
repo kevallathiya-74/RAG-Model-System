@@ -31,7 +31,7 @@ scripts
 scripts/
 
 # Docs & Frontend build artifacts
-docs/adr
+docs
 frontend/node_modules/
 frontend/dist/
 

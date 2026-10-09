@@ -481,7 +481,7 @@ def list_admin_documents(
                     i.status,
                     i.chunk_count,
                     owner.user_id as owner_id,
-                    ARRAY['finance_manager']::varchar[] as allowed_roles,
+                    '{}'::varchar[] as allowed_roles,
                     '{}'::varchar[] as allowed_users
                 FROM images i
                 LEFT JOIN departments dep ON i.department_id = dep.id
