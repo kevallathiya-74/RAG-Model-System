@@ -3,6 +3,74 @@ import { chatApi } from '../api/client.js';
 import { Citations } from './Citations.jsx';
 import { formatLatency } from '../utils/format.js';
 
+function renderInlineFormatting(text) {
+  if (!text) return null;
+  const parts = [];
+  const regex = /(\*\*.*?\*\*|`.*?`|\[(?:SRC-\d+|SRC-DB-\d+)\])/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.substring(lastIndex, match.index));
+    }
+    const token = match[0];
+    if (token.startsWith('**') && token.endsWith('**')) {
+      parts.push(<strong key={match.index}>{token.slice(2, -2)}</strong>);
+    } else if (token.startsWith('`') && token.endsWith('`')) {
+      parts.push(<code key={match.index}>{token.slice(1, -1)}</code>);
+    } else if (token.startsWith('[SRC-')) {
+      parts.push(<span key={match.index} className="inline-source-tag">{token}</span>);
+    } else {
+      parts.push(token);
+    }
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.substring(lastIndex));
+  }
+  return parts.length > 0 ? parts : text;
+}
+
+function renderMessageBody(text) {
+  if (!text) return null;
+  const lines = text.split('\n');
+  const elements = [];
+  let currentList = [];
+
+  const flushList = () => {
+    if (currentList.length > 0) {
+      elements.push(
+        <ul key={`ul-${elements.length}`} className="chat-markdown-list">
+          {currentList.map((item, idx) => (
+            <li key={idx}>{renderInlineFormatting(item)}</li>
+          ))}
+        </ul>
+      );
+      currentList = [];
+    }
+  };
+
+  lines.forEach((line, idx) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+      currentList.push(trimmed.slice(2));
+    } else {
+      flushList();
+      if (trimmed.length > 0) {
+        elements.push(
+          <p key={`p-${idx}`} className="chat-markdown-para">
+            {renderInlineFormatting(line)}
+          </p>
+        );
+      }
+    }
+  });
+  flushList();
+
+  return elements.length > 0 ? elements : text;
+}
+
 export function Chat({ user }) {
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState([]);
@@ -162,7 +230,7 @@ export function Chat({ user }) {
                     <span className="message-time">{msg.timestamp}</span>
                   </div>
 
-                  <div className="message-body-text">{msg.text}</div>
+                  <div className="message-body-text">{renderMessageBody(msg.text)}</div>
 
                   {msg.sender === 'assistant' && (
                     <div className="assistant-footer">

@@ -42,22 +42,49 @@ def classify_ocr_quality(avg_conf: float) -> str:
         return "LOW"
 
 def chunk_text_tokens(text: str, chunk_size: int = 500, overlap: int = 75) -> List[str]:
-    words = text.split()
-    if not words:
+    if not text or not text.strip():
         return []
-    if len(words) <= chunk_size:
-        return [text]
     
-    chunks = []
-    step = chunk_size - overlap
-    if step <= 0:
-        step = chunk_size
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if not paragraphs:
+        paragraphs = [text.strip()]
         
-    for i in range(0, len(words), step):
-        chunk_words = words[i:i + chunk_size]
-        chunks.append(" ".join(chunk_words))
-        if i + chunk_size >= len(words):
-            break
+    chunks = []
+    current_chunk = []
+    current_len = 0
+    
+    for para in paragraphs:
+        para_words = para.split()
+        if not para_words:
+            continue
+            
+        # If single paragraph is larger than chunk_size, split by sliding word windows
+        if len(para_words) > chunk_size:
+            if current_chunk:
+                chunks.append(" ".join(current_chunk))
+                current_chunk = []
+                current_len = 0
+            step = chunk_size - overlap
+            if step <= 0:
+                step = chunk_size
+            for i in range(0, len(para_words), step):
+                chunks.append(" ".join(para_words[i:i + chunk_size]))
+                if i + chunk_size >= len(para_words):
+                    break
+            continue
+            
+        if current_len + len(para_words) <= chunk_size:
+            current_chunk.extend(para_words)
+            current_len += len(para_words)
+        else:
+            chunks.append(" ".join(current_chunk))
+            overlap_words = current_chunk[-overlap:] if overlap < len(current_chunk) else []
+            current_chunk = overlap_words + para_words
+            current_len = len(current_chunk)
+            
+    if current_chunk:
+        chunks.append(" ".join(current_chunk))
+        
     return chunks
 
 def sanitize_filename(filename: str) -> str:
