@@ -187,11 +187,10 @@ def list_admin_users(
     try:
         with conn.cursor() as cur:
             query = """
-            SELECT u.user_id, u.name, r.name as role_name, d.name as dept_name,
+            SELECT u.user_id, u.name, r.name as role_name, NULL as dept_name,
                    u.tenant_id, u.is_active, u.created_at
             FROM users u
             JOIN roles r ON u.role_id = r.id
-            LEFT JOIN departments d ON u.department_id = d.id
             WHERE u.tenant_id = %s
             ORDER BY u.id ASC;
             """
@@ -413,7 +412,7 @@ def list_admin_documents(
                     d.document_id,
                     d.filename,
                     d.source_type,
-                    dep.name as department,
+                    NULL as department,
                     d.sensitivity,
                     d.status,
                     d.chunk_count,
@@ -421,19 +420,18 @@ def list_admin_documents(
                     COALESCE(array_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL), '{}') as allowed_roles,
                     COALESCE(array_agg(DISTINCT u.user_id) FILTER (WHERE u.user_id IS NOT NULL), '{}') as allowed_users
                 FROM documents d
-                LEFT JOIN departments dep ON d.department_id = dep.id
                 LEFT JOIN users owner ON d.owner_user_id = owner.id
                 LEFT JOIN document_permissions dp ON d.id = dp.document_id
                 LEFT JOIN roles r ON dp.role_id = r.id
                 LEFT JOIN users u ON dp.user_id = u.id
                 WHERE d.tenant_id = %s
-                GROUP BY d.id, dep.name, owner.user_id
+                GROUP BY d.id, owner.user_id
                 UNION ALL
                 SELECT 
                     i.image_id as document_id,
                     i.filename,
                     i.source_type,
-                    dep.name as department,
+                    NULL as department,
                     i.sensitivity,
                     i.status,
                     i.chunk_count,
@@ -441,13 +439,12 @@ def list_admin_documents(
                     COALESCE(array_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL), '{}') as allowed_roles,
                     COALESCE(array_agg(DISTINCT u.user_id) FILTER (WHERE u.user_id IS NOT NULL), '{}') as allowed_users
                 FROM images i
-                LEFT JOIN departments dep ON i.department_id = dep.id
                 LEFT JOIN users owner ON i.owner_user_id = owner.id
                 LEFT JOIN image_permissions ip ON i.id = ip.image_id
                 LEFT JOIN roles r ON ip.role_id = r.id
                 LEFT JOIN users u ON ip.user_id = u.id
                 WHERE i.tenant_id = %s
-                GROUP BY i.id, dep.name, owner.user_id
+                GROUP BY i.id, owner.user_id
                 ORDER BY document_id ASC;
                 """, (current_user.tenant_id, current_user.tenant_id))
             else:
@@ -456,7 +453,7 @@ def list_admin_documents(
                     d.document_id,
                     d.filename,
                     d.source_type,
-                    dep.name as department,
+                    NULL as department,
                     d.sensitivity,
                     d.status,
                     d.chunk_count,
@@ -464,19 +461,18 @@ def list_admin_documents(
                     COALESCE(array_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL), '{}') as allowed_roles,
                     COALESCE(array_agg(DISTINCT u.user_id) FILTER (WHERE u.user_id IS NOT NULL), '{}') as allowed_users
                 FROM documents d
-                LEFT JOIN departments dep ON d.department_id = dep.id
                 LEFT JOIN users owner ON d.owner_user_id = owner.id
                 LEFT JOIN document_permissions dp ON d.id = dp.document_id
                 LEFT JOIN roles r ON dp.role_id = r.id
                 LEFT JOIN users u ON dp.user_id = u.id
                 WHERE d.tenant_id = %s
-                GROUP BY d.id, dep.name, owner.user_id
+                GROUP BY d.id, owner.user_id
                 UNION ALL
                 SELECT 
                     i.image_id as document_id,
                     i.filename,
                     i.source_type,
-                    dep.name as department,
+                    NULL as department,
                     i.sensitivity,
                     i.status,
                     i.chunk_count,
@@ -484,10 +480,9 @@ def list_admin_documents(
                     '{}'::varchar[] as allowed_roles,
                     '{}'::varchar[] as allowed_users
                 FROM images i
-                LEFT JOIN departments dep ON i.department_id = dep.id
                 LEFT JOIN users owner ON i.owner_user_id = owner.id
                 WHERE i.tenant_id = %s
-                GROUP BY i.id, dep.name, owner.user_id
+                GROUP BY i.id, owner.user_id
                 ORDER BY document_id ASC;
                 """, (current_user.tenant_id, current_user.tenant_id))
             rows = cur.fetchall()

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getStoredUser, clearAuth, onUnauthorized, getAuthToken } from './api/client.js';
+import { getStoredUser, clearAuth, onUnauthorized, getAuthToken, checkHealthApi } from './api/client.js';
 import { Login } from './components/Login.jsx';
 import { Chat } from './components/Chat.jsx';
 import { Documents } from './components/Documents.jsx';
@@ -16,6 +16,7 @@ const formatRoleName = (role) => {
 export default function App() {
   const [user, setUser] = useState(() => getStoredUser());
   const [activeTab, setActiveTab] = useState('chat');
+  const [systemHealth, setSystemHealth] = useState(null);
 
   useEffect(() => {
     // Check if token exists
@@ -29,8 +30,18 @@ export default function App() {
       setUser(null);
     });
 
+    // Probe live service readiness
+    const pollHealth = () => {
+      checkHealthApi()
+        .then((data) => setSystemHealth(data))
+        .catch(() => setSystemHealth({ status: 'offline', services: {} }));
+    };
+    pollHealth();
+    const interval = setInterval(pollHealth, 30000);
+
     return () => {
       unsubscribe();
+      clearInterval(interval);
     };
   }, []);
 
@@ -151,14 +162,6 @@ export default function App() {
           <Admin user={user} />
         )}
       </main>
-
-      <footer className="app-footer">
-        <span>Authoritative Identity: PostgreSQL</span>
-        <span className="footer-separator">•</span>
-        <span>Vector ACL: Qdrant Cloud</span>
-        <span className="footer-separator">•</span>
-        <span>LLM: Local Gemma 3 1B</span>
-      </footer>
     </div>
   );
 }

@@ -96,7 +96,7 @@ export function Login({ onLoginSuccess }) {
                   setFieldErrors((prev) => ({ ...prev, username: null }));
                 }
               }}
-              placeholder="e.g., U001, U002, U003..."
+              placeholder="e.g., U001, U1001, U2001..."
               autoComplete="username"
               autoFocus
               disabled={loading}
@@ -127,7 +127,7 @@ export function Login({ onLoginSuccess }) {
                   setFieldErrors((prev) => ({ ...prev, password: null }));
                 }
               }}
-              placeholder="Enter secure password"
+              placeholder="Enter Password"
               autoComplete="current-password"
               disabled={loading}
               className={`form-input ${fieldErrors.password ? 'input-error' : ''}`}
@@ -154,16 +154,10 @@ export function Login({ onLoginSuccess }) {
                 Authenticating...
               </span>
             ) : (
-              'Sign In with JWT'
+              'Sign In'
             )}
           </button>
         </form>
-
-        <div className="login-footer-info">
-          <span className="info-badge">Tenant Enforced</span>
-          <span className="info-badge">PostgreSQL Auth</span>
-          <span className="info-badge">Retrieval ACL Gate</span>
-        </div>
       </div>
     </div>
   );

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { chatApi } from '../api/client.js';
 import { Citations } from './Citations.jsx';
+import { formatLatency } from '../utils/format.js';
 
 export function Chat({ user }) {
   const [question, setQuestion] = useState('');
@@ -109,80 +110,95 @@ export function Chat({ user }) {
               <strong>{user?.role || 'authorized user'}</strong>) and tenant.
             </p>
             <div className="sample-queries-list">
-              <span className="sample-label">Suggested Queries:</span>
-              <button
-                type="button"
-                className="sample-query-chip"
-                onClick={() => setQuestion('What are the company leave policies?')}
-              >
-                "What are the company leave policies?"
-              </button>
-              <button
-                type="button"
-                className="sample-query-chip"
-                onClick={() => setQuestion('Who are the managers in the HR department?')}
-              >
-                "Who are the managers in the HR department?"
-              </button>
-              <button
-                type="button"
-                className="sample-query-chip"
-                onClick={() => setQuestion('What is the remote work policy?')}
-              >
-                "What is the remote work policy?"
-              </button>
+              <span className="sample-label">
+                Suggested Queries for <strong>{user?.role || 'User'}</strong>:
+              </span>
+              {(user?.role === 'student' ? [
+                'What are my student directory details for STU-1001?',
+                'What is my attendance record for Computer Science?',
+                'What is the schedule for engineering classes?',
+                'What is the student access control policy?'
+              ] : user?.role === 'faculty' ? [
+                'List faculty directory and course assignments for teaching staff.',
+                'Show the class schedule and room allocations for Engineering.',
+                'What are the access control policies for faculty and staff?',
+                'What student directories am I authorized to access?'
+              ] : user?.role === 'finance_manager' ? [
+                'Show my assigned fee receipts and collection ledger.',
+                'What are the payment details for fee receipt REC-3001?',
+                'Summarize fee collection totals for my department.',
+                'What is the financial access control policy?'
+              ] : [
+                'What is the access control policy for sensitive documents (EDU-POL-001)?',
+                'What is the summary of the fee ledger and student payments?',
+                'Show teacher directory and class schedule overview.',
+                'Which employees belong to the Operations department?'
+              ]).map((queryText) => (
+                <button
+                  key={queryText}
+                  type="button"
+                  className="sample-query-chip"
+                  onClick={() => setQuestion(queryText)}
+                  title="Click to insert query"
+                >
+                  "{queryText}"
+                </button>
+              ))}
             </div>
           </div>
         ) : (
-          messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`message-row ${msg.sender === 'user' ? 'row-user' : 'row-assistant'}`}
-            >
-              <div className={`message-bubble ${msg.sender === 'user' ? 'bubble-user' : 'bubble-assistant'}`}>
-                <div className="message-meta-header">
-                  <span className="message-sender-name">
-                    {msg.sender === 'user' ? (user?.name || 'You') : 'Secure RAG Agent'}
-                  </span>
-                  <span className="message-time">{msg.timestamp}</span>
-                </div>
-
-                <div className="message-body-text">{msg.text}</div>
-
-                {msg.sender === 'assistant' && (
-                  <div className="assistant-footer">
-                    <div className="grounding-status-bar">
-                      {msg.grounded ? (
-                        <span className="badge badge-success">
-                          <span className="status-dot dot-success" aria-hidden="true" />
-                          Grounded in Authorized Sources
-                        </span>
-                      ) : (
-                        <span className="badge badge-warning">
-                          <span className="status-dot dot-warning" aria-hidden="true" />
-                          Restricted / Safe Refusal
-                        </span>
-                      )}
-
-                      {msg.retrievalCount !== undefined && msg.retrievalCount > 0 && (
-                        <span className="badge badge-neutral">
-                          Retrieved Chunks: {msg.retrievalCount}
-                        </span>
-                      )}
-
-                      {msg.latencies?.total_sec !== undefined && (
-                        <span className="latency-text">
-                          {(msg.latencies.total_sec * 1000).toFixed(0)}ms
-                        </span>
-                      )}
-                    </div>
-
-                    <Citations citations={msg.citations} />
+          messages.map((msg) => {
+            const formattedLatency = msg.sender === 'assistant' ? formatLatency(msg.latencies) : null;
+            return (
+              <div
+                key={msg.id}
+                className={`message-row ${msg.sender === 'user' ? 'row-user' : 'row-assistant'}`}
+              >
+                <div className={`message-bubble ${msg.sender === 'user' ? 'bubble-user' : 'bubble-assistant'}`}>
+                  <div className="message-meta-header">
+                    <span className="message-sender-name">
+                      {msg.sender === 'user' ? (user?.name || 'You') : 'Secure RAG Agent'}
+                    </span>
+                    <span className="message-time">{msg.timestamp}</span>
                   </div>
-                )}
+
+                  <div className="message-body-text">{msg.text}</div>
+
+                  {msg.sender === 'assistant' && (
+                    <div className="assistant-footer">
+                      <div className="grounding-status-bar">
+                        {msg.grounded ? (
+                          <span className="badge badge-success">
+                            <span className="status-dot dot-success" aria-hidden="true" />
+                            Grounded in Authorized Sources
+                          </span>
+                        ) : (
+                          <span className="badge badge-warning">
+                            <span className="status-dot dot-warning" aria-hidden="true" />
+                            Restricted / Safe Refusal
+                          </span>
+                        )}
+
+                        {msg.retrievalCount !== undefined && msg.retrievalCount > 0 && (
+                          <span className="badge badge-neutral">
+                            Retrieved Chunks: {msg.retrievalCount}
+                          </span>
+                        )}
+
+                        {formattedLatency && (
+                          <span className="latency-text">
+                            {formattedLatency}
+                          </span>
+                        )}
+                      </div>
+
+                      <Citations citations={msg.citations} />
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
 
         {loading && (

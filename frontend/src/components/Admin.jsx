@@ -89,6 +89,7 @@ export function Admin({ user }) {
   };
 
   useEffect(() => {
+    // Initial load for active subTab and background metric sync
     if (subTab === 'audit') {
       fetchAuditLogs(1);
     } else if (subTab === 'users') {
@@ -97,6 +98,12 @@ export function Admin({ user }) {
       fetchDocuments();
     }
   }, [subTab]);
+
+  // Load summary metrics on initial mount
+  useEffect(() => {
+    fetchUsers();
+    fetchDocuments();
+  }, []);
 
   const handleAuditFilterSubmit = (e) => {
     e.preventDefault();
@@ -207,6 +214,30 @@ export function Admin({ user }) {
         </div>
       </div>
 
+      {/* Dynamic System Stats Ribbon */}
+      <div className="admin-stats-ribbon" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginTop: '16px' }}>
+        <div className="stat-card" style={{ background: 'var(--color-surface)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+          <span className="text-xs text-muted" style={{ display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Security Events</span>
+          <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-primary)' }}>{auditTotalItems}</span>
+          <span className="text-xs text-muted" style={{ display: 'block' }}>Immutable audit log entries</span>
+        </div>
+        <div className="stat-card" style={{ background: 'var(--color-surface)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+          <span className="text-xs text-muted" style={{ display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Tenant Users</span>
+          <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{adminUsers.length}</span>
+          <span className="text-xs text-muted" style={{ display: 'block' }}>{adminUsers.filter((u) => u.is_active).length} Active accounts</span>
+        </div>
+        <div className="stat-card" style={{ background: 'var(--color-surface)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+          <span className="text-xs text-muted" style={{ display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Governed Assets</span>
+          <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{adminDocuments.length}</span>
+          <span className="text-xs text-muted" style={{ display: 'block' }}>PDFs & OCR image receipts</span>
+        </div>
+        <div className="stat-card" style={{ background: 'var(--color-surface)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--color-border)' }}>
+          <span className="text-xs text-muted" style={{ display: 'block', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Security Boundary</span>
+          <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-success)', marginTop: '4px', display: 'block' }}>4 Canonical Roles</span>
+          <span className="text-xs text-muted" style={{ display: 'block' }}>Tenant: {user?.tenant_id || 'TENANT-001'}</span>
+        </div>
+      </div>
+
       {errorBanner && (
         <div className="alert-box alert-error" role="alert" style={{ marginTop: '16px' }}>
           <span>{errorBanner}</span>
@@ -239,6 +270,33 @@ export function Admin({ user }) {
             >
               {loadingAudit ? 'Refreshing...' : 'Refresh Logs'}
             </button>
+          </div>
+
+          {/* Quick Action Filter Chips */}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px', alignItems: 'center' }}>
+            <span className="text-xs text-muted">Quick Filters:</span>
+            {[
+              { label: 'All Actions', action: '', result: '' },
+              { label: 'Denied Attempts', action: '', result: 'denied' },
+              { label: 'Semantic Queries', action: 'semantic_query', result: '' },
+              { label: 'Logins', action: 'login_success', result: '' },
+              { label: 'Admin Inspects', action: 'admin_audit_inspect', result: '' }
+            ].map((chip) => (
+              <button
+                key={chip.label}
+                type="button"
+                className={`btn btn-sm ${auditActionFilter === chip.action && auditResultFilter === chip.result ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: '0.8rem', padding: '3px 8px' }}
+                onClick={() => {
+                  setAuditActionFilter(chip.action);
+                  setAuditResultFilter(chip.result);
+                  setAuditPage(1);
+                  fetchAuditLogs(1);
+                }}
+              >
+                {chip.label}
+              </button>
+            ))}
           </div>
 
           <form onSubmit={handleAuditFilterSubmit} className="form-row" style={{ marginTop: '12px', alignItems: 'flex-end' }}>

@@ -182,9 +182,14 @@ export async function uploadDocumentApi(formData) {
 }
 
 export async function checkHealthApi() {
-  return apiRequest('/api/health', {
-    method: 'GET'
-  });
+  try {
+    return await apiRequest('/api/health/ready', { method: 'GET' });
+  } catch {
+    return await apiRequest('/api/health', { method: 'GET' }).catch(() => ({
+      status: 'offline',
+      services: { database: 'offline', qdrant: 'offline', ollama: 'offline' }
+    }));
+  }
 }
 
 // Administrative API Methods

@@ -10,6 +10,11 @@ import {
   chatApi,
   getDocumentsApi
 } from '../src/api/client.js';
+import {
+  formatDurationMs,
+  formatDurationSec,
+  formatLatency
+} from '../src/utils/format.js';
 
 describe('Secure API Client - Auth & State Management', () => {
   let mockStorage = {};
@@ -171,5 +176,71 @@ describe('Secure API Client - Auth & State Management', () => {
     expect(res.grounded).toBe(true);
     expect(res.citations).toHaveLength(1);
     expect(res.citations[0].source_id).toBe('SRC-1');
+    expect(formatLatency(res.latencies)).toBe('450 ms');
   });
 });
+
+describe('Response Latency & Duration Formatting Utilities', () => {
+  it('formats normal millisecond durations under 1000ms correctly', () => {
+    expect(formatDurationMs(125)).toBe('125 ms');
+    expect(formatDurationMs(999)).toBe('999 ms');
+  });
+
+  it('formats durations of at least one second as seconds with 2 decimals', () => {
+    expect(formatDurationMs(1000)).toBe('1.00 s');
+    expect(formatDurationMs(8568)).toBe('8.57 s');
+    expect(formatDurationMs(8662)).toBe('8.66 s');
+    expect(formatDurationMs(14042)).toBe('14.04 s');
+    expect(formatDurationMs(60000)).toBe('60.00 s');
+  });
+
+  it('handles unit boundaries consistently without 1000ms artifact', () => {
+    expect(formatDurationMs(999.4)).toBe('999 ms');
+    expect(formatDurationMs(999.5)).toBe('1.00 s');
+    expect(formatDurationMs(1000.0)).toBe('1.00 s');
+  });
+
+  it('handles zero correctly as 0 ms', () => {
+    expect(formatDurationMs(0)).toBe('0 ms');
+    expect(formatDurationSec(0)).toBe('0 ms');
+  });
+
+  it('returns null for missing, null, undefined, negative, or non-finite values', () => {
+    expect(formatDurationMs(null)).toBeNull();
+    expect(formatDurationMs(undefined)).toBeNull();
+    expect(formatDurationMs(-500)).toBeNull();
+    expect(formatDurationMs(NaN)).toBeNull();
+    expect(formatDurationMs(Infinity)).toBeNull();
+  });
+
+  it('formats latencies metadata object from real API responses', () => {
+    // Semantic RAG pipeline (total_sec)
+    expect(formatLatency({ total_sec: 14.042 })).toBe('14.04 s');
+    expect(formatLatency({ total_sec: 8.568 })).toBe('8.57 s');
+    expect(formatLatency({ total_sec: 8.662 })).toBe('8.66 s');
+    expect(formatLatency({ total_sec: 0.45 })).toBe('450 ms');
+
+    // Structured / Hybrid query routes (total fallback)
+    expect(formatLatency({ total: 0.125, database: 0.05 })).toBe('125 ms');
+    expect(formatLatency({ total: 1.25, database: 0.1 })).toBe('1.25 s');
+
+    // Missing or invalid metadata
+    expect(formatLatency(null)).toBeNull();
+    expect(formatLatency({})).toBeNull();
+    expect(formatLatency({ total_sec: -1 })).toBeNull();
+    expect(formatLatency({ total_sec: NaN })).toBeNull();
+  });
+
+  it('ensures each chat response displays its own measured value independently', () => {
+    const responses = [
+      { sender: 'assistant', latencies: { total_sec: 14.042 } },
+      { sender: 'assistant', latencies: { total_sec: 8.568 } },
+      { sender: 'assistant', latencies: { total_sec: 0.125 } },
+      { sender: 'assistant', latencies: {} }
+    ];
+
+    const formatted = responses.map((r) => formatLatency(r.latencies));
+    expect(formatted).toEqual(['14.04 s', '8.57 s', '125 ms', null]);
+  });
+});
+

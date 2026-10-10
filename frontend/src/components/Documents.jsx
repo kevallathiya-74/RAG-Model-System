@@ -14,6 +14,12 @@ export function Documents({ user }) {
   const [sensitivity, setSensitivity] = useState('internal');
   const [allowedRoles, setAllowedRoles] = useState('');
 
+  // Filter & Search state
+  const [filterFormat, setFilterFormat] = useState('all'); // 'all', 'pdf', 'image'
+  const [searchFilter, setSearchFilter] = useState('');
+
+  const isStudent = user?.role === 'student';
+
   const fetchDocuments = async () => {
     setLoading(true);
     setErrorBanner('');
@@ -49,7 +55,7 @@ export function Documents({ user }) {
 
   const handleUpload = async (e) => {
     e.preventDefault();
-    if (!selectedFile || uploading) {
+    if (!selectedFile || uploading || isStudent) {
       return;
     }
 
@@ -90,6 +96,19 @@ export function Documents({ user }) {
     }
   };
 
+  // Filtered documents calculation
+  const pdfCount = documents.filter((d) => d.source_type === 'pdf').length;
+  const imgCount = documents.filter((d) => d.source_type === 'image').length;
+
+  const filteredDocuments = documents.filter((doc) => {
+    const matchesFormat = filterFormat === 'all' || doc.source_type === filterFormat;
+    const q = searchFilter.trim().toLowerCase();
+    const matchesSearch = !q || 
+      doc.document_id.toLowerCase().includes(q) || 
+      doc.filename.toLowerCase().includes(q);
+    return matchesFormat && matchesSearch;
+  });
+
   return (
     <div className="documents-interface">
       {errorBanner && (
@@ -127,78 +146,86 @@ export function Documents({ user }) {
           Upload PDF or image files to extract text/OCR, chunk content, generate embeddings via Ollama, and index with retrieval-layer ACL into Qdrant.
         </p>
 
-        <form onSubmit={handleUpload} className="upload-form">
-          <div className="form-row">
-            <div className="form-group flex-2">
-              <label htmlFor="doc-file-upload" className="form-label">
-                Select Document or Image <span aria-hidden="true">*</span>
-              </label>
-              <input
-                id="doc-file-upload"
-                type="file"
-                accept=".pdf,.png,.jpg,.jpeg"
-                onChange={handleFileChange}
-                disabled={uploading}
-                className="form-input-file"
-                aria-required="true"
-              />
-              <span className="field-hint">Accepted: PDF, PNG, JPG, JPEG (Max 20MB)</span>
-            </div>
-
-            <div className="form-group flex-1">
-              <label htmlFor="sensitivity-select" className="form-label">
-                Sensitivity Classification
-              </label>
-              <select
-                id="sensitivity-select"
-                value={sensitivity}
-                onChange={(e) => setSensitivity(e.target.value)}
-                disabled={uploading}
-                className="form-select"
-              >
-                <option value="internal">Internal</option>
-                <option value="confidential">Confidential</option>
-                <option value="restricted">Restricted</option>
-              </select>
-            </div>
+        {isStudent ? (
+          <div className="alert-box alert-info" style={{ marginTop: '12px' }}>
+            <span>
+              <strong>Read-Only Notice:</strong> Student accounts have read-only access to academic records under security policy EDU-POL-001. Document ingestion is restricted to faculty, finance, and administrative roles.
+            </span>
           </div>
+        ) : (
+          <form onSubmit={handleUpload} className="upload-form">
+            <div className="form-row">
+              <div className="form-group flex-2">
+                <label htmlFor="doc-file-upload" className="form-label">
+                  Select Document or Image <span aria-hidden="true">*</span>
+                </label>
+                <input
+                  id="doc-file-upload"
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  onChange={handleFileChange}
+                  disabled={uploading}
+                  className="form-input-file"
+                  aria-required="true"
+                />
+                <span className="field-hint">Accepted: PDF, PNG, JPG, JPEG (Max 20MB)</span>
+              </div>
 
-          <div className="form-row">
-            <div className="form-group flex-2">
-              <label htmlFor="allowed-roles-input" className="form-label">
-                Access Restriction (Optional Roles)
-              </label>
-              <input
-                id="allowed-roles-input"
-                type="text"
-                value={allowedRoles}
-                onChange={(e) => setAllowedRoles(e.target.value)}
-                placeholder="e.g. faculty, finance_manager, admin (leave blank for default)"
-                disabled={uploading}
-                className="form-input"
-              />
-              <span className="field-hint">Comma-separated canonical roles allowed to access document</span>
+              <div className="form-group flex-1">
+                <label htmlFor="sensitivity-select" className="form-label">
+                  Sensitivity Classification
+                </label>
+                <select
+                  id="sensitivity-select"
+                  value={sensitivity}
+                  onChange={(e) => setSensitivity(e.target.value)}
+                  disabled={uploading}
+                  className="form-select"
+                >
+                  <option value="internal">Internal</option>
+                  <option value="confidential">Confidential</option>
+                  <option value="restricted">Restricted</option>
+                </select>
+              </div>
             </div>
 
-            <div className="form-group flex-1 form-action-align">
-              <button
-                type="submit"
-                disabled={!selectedFile || uploading}
-                className="btn btn-primary btn-block"
-                aria-busy={uploading}
-              >
-                {uploading ? (
-                  <span className="btn-loading-content">
-                    <span className="spinner" aria-hidden="true" />
-                    Extracting & Indexing...
-                  </span>
-                ) : (
-                  'Upload & Index'
-                )}
-              </button>
+            <div className="form-row">
+              <div className="form-group flex-2">
+                <label htmlFor="allowed-roles-input" className="form-label">
+                  Access Restriction (Optional Roles)
+                </label>
+                <input
+                  id="allowed-roles-input"
+                  type="text"
+                  value={allowedRoles}
+                  onChange={(e) => setAllowedRoles(e.target.value)}
+                  placeholder="e.g. faculty, finance_manager, admin (leave blank for default)"
+                  disabled={uploading}
+                  className="form-input"
+                />
+                <span className="field-hint">Comma-separated canonical roles allowed to access document</span>
+              </div>
+
+              <div className="form-group flex-1 form-action-align">
+                <button
+                  type="submit"
+                  disabled={!selectedFile || uploading}
+                  className="btn btn-primary btn-block"
+                  aria-busy={uploading}
+                >
+                  {uploading ? (
+                    <span className="btn-loading-content">
+                      <span className="spinner" aria-hidden="true" />
+                      Extracting & Indexing...
+                    </span>
+                  ) : (
+                    'Upload & Index'
+                  )}
+                </button>
+              </div>
             </div>
-          </div>
-        </form>
+          </form>
+        )}
       </section>
 
       {/* Document List Section */}
@@ -206,10 +233,10 @@ export function Documents({ user }) {
         <div className="docs-list-header">
           <div>
             <h2 id="docs-list-heading" className="section-title">
-              Authorized Tenant Documents
+              Authorized Tenant Assets ({totalCount} Total)
             </h2>
             <p className="section-desc">
-              List of documents and multi-modal assets authorized for your identity and role.
+              Multi-modal documents and receipt scans authorized for identity <strong>{user?.user_id}</strong> ({user?.role}).
             </p>
           </div>
           <button
@@ -219,16 +246,54 @@ export function Documents({ user }) {
             className="btn btn-secondary btn-refresh"
             aria-label="Refresh document list"
           >
-            {loading ? <span className="spinner small-spinner" aria-hidden="true" /> : 'Refresh'}
+            {loading ? <span className="spinner small-spinner" aria-hidden="true" /> : 'Refresh Assets'}
           </button>
+        </div>
+
+        {/* Dynamic Asset Filter & Search Bar */}
+        <div className="form-row" style={{ marginTop: '16px', alignItems: 'center', gap: '12px' }}>
+          <div className="filter-pills-group" style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              className={`btn btn-sm ${filterFormat === 'all' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilterFormat('all')}
+            >
+              All Assets ({totalCount})
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${filterFormat === 'pdf' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilterFormat('pdf')}
+            >
+              PDF Documents ({pdfCount})
+            </button>
+            <button
+              type="button"
+              className={`btn btn-sm ${filterFormat === 'image' ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setFilterFormat('image')}
+            >
+              Scanned Receipts ({imgCount})
+            </button>
+          </div>
+
+          <div style={{ flex: 1, minWidth: '200px' }}>
+            <input
+              type="text"
+              placeholder="Search by ID or filename..."
+              value={searchFilter}
+              onChange={(e) => setSearchFilter(e.target.value)}
+              className="form-input"
+              style={{ padding: '6px 12px' }}
+            />
+          </div>
         </div>
 
         {loading ? (
           <div className="loading-state-box">
             <span className="spinner" aria-hidden="true" />
-            <p>Loading authorized documents...</p>
+            <p>Loading authorized documents & receipts...</p>
           </div>
-        ) : documents.length === 0 ? (
+        ) : filteredDocuments.length === 0 ? (
           <div className="empty-state-box">
             <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -237,29 +302,29 @@ export function Documents({ user }) {
               <line x1="16" y1="17" x2="8" y2="17" />
               <polyline points="10 9 9 9 8 9" />
             </svg>
-            <p>No authorized documents found for your role in this tenant.</p>
+            <p>No authorized documents found matching the filter criteria.</p>
           </div>
         ) : (
-          <div className="table-responsive">
+          <div className="table-responsive" style={{ marginTop: '12px' }}>
             <table className="doc-table">
               <thead>
                 <tr>
-                  <th scope="col">Document ID</th>
+                  <th scope="col">Asset ID</th>
                   <th scope="col">Filename</th>
-                  <th scope="col">Format</th>
+                  <th scope="col">Type</th>
                   <th scope="col">Status</th>
-                  <th scope="col">Chunks Indexed</th>
+                  <th scope="col">Chunks</th>
                   <th scope="col">Tenant</th>
                 </tr>
               </thead>
               <tbody>
-                {documents.map((doc) => (
+                {filteredDocuments.map((doc) => (
                   <tr key={doc.document_id}>
                     <td className="font-mono text-xs">{doc.document_id}</td>
                     <td className="font-medium">{doc.filename}</td>
                     <td>
                       <span className={`badge-pill ${doc.source_type === 'pdf' ? 'pill-pdf' : 'pill-img'}`}>
-                        {doc.source_type}
+                        {doc.source_type === 'pdf' ? 'PDF Doc' : 'Image OCR'}
                       </span>
                     </td>
                     <td>

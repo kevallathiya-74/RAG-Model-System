@@ -970,3 +970,78 @@ body {
     min-width: unset;
   }
 }
+
+/* Quick Demo Persona Selectors */
+.demo-personas-section {
+  margin-bottom: 16px;
+  background-color: var(--color-bg);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+}
+
+.demo-personas-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+
+.demo-personas-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.persona-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 8px 10px;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  text-align: left;
+}
+
+.persona-chip:hover {
+  background-color: var(--color-primary-light);
+  border-color: var(--color-border-focus);
+  transform: translateY(-1px);
+}
+
+.persona-chip .persona-role {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-primary);
+}
+
+.persona-chip .persona-id {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+}
+
+/* Footer Health Status */
+.footer-health-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+/* Admin Stat Card */
+.stat-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}

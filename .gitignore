@@ -5,6 +5,8 @@ env.txt
 
 # Databases & caches
 *.db
+database/backups/
+*.sql.bak
 __pycache__/
 *.pyc
 .pytest_cache/

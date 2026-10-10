@@ -74,9 +74,15 @@ def _execute_structured_query_internal(
 ) -> ChatResponse:
     tenant_id = auth_ctx.get("tenant_id", "TENANT-001")
     
-    # 1. Handle Departments entity first
-    if intent.entity == "departments":
-        return _execute_departments_list(auth_ctx, t_start)
+    # 1. Obsolete entities (employees, departments) have been retired permanently
+    if intent.entity in ("departments", "employees"):
+        return ChatResponse(
+            answer=SAFE_REFUSAL,
+            citations=[],
+            retrieval_count=0,
+            grounded=False,
+            latencies={"database": 0.0, "total": round(time.time() - t_start, 4)}
+        )
 
     # 2. Determine if this is a self-access query
     is_self = False

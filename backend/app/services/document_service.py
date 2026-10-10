@@ -126,15 +126,15 @@ except Exception as e:
 
         raise RuntimeError("PaddleOCR engine is not installed or available in .venv or .venv311.")
 
-def get_db_user_and_dept_ids(user_id: str) -> Tuple[int, Optional[int]]:
+def get_db_user_id(user_id: str) -> int:
     conn = get_db_connection()
     cur = conn.cursor()
     try:
-        cur.execute("SELECT id, department_id FROM users WHERE user_id = %s;", (user_id,))
+        cur.execute("SELECT id FROM users WHERE user_id = %s;", (user_id,))
         row = cur.fetchone()
         if not row:
             raise ValueError(f"User {user_id} not found in database.")
-        return row[0], row[1]
+        return row[0]
     finally:
         conn.close()
 
@@ -235,8 +235,8 @@ def ingest_document(
     with open(stored_path, "wb") as f:
         f.write(file_bytes)
 
-    # Resolve DB User & Department
-    user_db_id, dept_id = get_db_user_and_dept_ids(current_user.user_id)
+    # Resolve DB User
+    user_db_id = get_db_user_id(current_user.user_id)
 
     # Validate and filter allowed roles against canonical role model
     roles_acl = set()
@@ -263,13 +263,13 @@ def ingest_document(
     try:
         insert_query = f"""
         INSERT INTO {table} (
-            {id_col}, filename, source_type, source_path, department_id, owner_user_id,
+            {id_col}, filename, source_type, source_path, owner_user_id,
             tenant_id, sensitivity, content_hash, file_size, mime_type, status, chunk_count
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'processing', 0)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'processing', 0)
         RETURNING id;
         """
         cur.execute(insert_query, (
-            doc_id, clean_name, source_type, stored_path, dept_id, user_db_id,
+            doc_id, clean_name, source_type, stored_path, user_db_id,
             current_user.tenant_id, sensitivity, content_hash, file_size, content_type
         ))
         db_record_id = cur.fetchone()[0]
@@ -564,10 +564,9 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
             if check_table_exists(cur, "image_permissions"):
                 query = """
                 SELECT 
-                    i.image_id, i.filename, i.source_type, i.tenant_id, dep.name, i.sensitivity,
+                    i.image_id, i.filename, i.source_type, i.tenant_id, i.sensitivity,
                     i.status, i.chunk_count, i.file_size, i.content_hash, i.created_at
                 FROM images i
-                LEFT JOIN departments dep ON i.department_id = dep.id
                 LEFT JOIN image_permissions ip ON i.id = ip.image_id
                 LEFT JOIN roles r ON ip.role_id = r.id
                 LEFT JOIN users u ON ip.user_id = u.id
@@ -578,7 +577,7 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
                       OR (r.name = %s AND %s = FALSE)
                       OR u.user_id = %s
                   )
-                GROUP BY i.id, dep.name;
+                GROUP BY i.id;
                 """
                 cur.execute(query, (
                     document_id,
@@ -592,14 +591,13 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
                 # Fallback when image_permissions is pending migration 004: strictly deny-by-default for non-owners
                 query = """
                 SELECT 
-                    i.image_id, i.filename, i.source_type, i.tenant_id, dep.name, i.sensitivity,
+                    i.image_id, i.filename, i.source_type, i.tenant_id, i.sensitivity,
                     i.status, i.chunk_count, i.file_size, i.content_hash, i.created_at
                 FROM images i
-                LEFT JOIN departments dep ON i.department_id = dep.id
                 LEFT JOIN users owner ON i.owner_user_id = owner.id
                 WHERE i.image_id = %s AND i.tenant_id = %s
                   AND owner.user_id = %s
-                GROUP BY i.id, dep.name;
+                GROUP BY i.id;
                 """
                 cur.execute(query, (
                     document_id,
@@ -609,10 +607,9 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
         else:
             query = """
             SELECT 
-                d.document_id, d.filename, d.source_type, d.tenant_id, dep.name, d.sensitivity,
+                d.document_id, d.filename, d.source_type, d.tenant_id, d.sensitivity,
                 d.status, d.chunk_count, d.file_size, d.content_hash, d.created_at
             FROM documents d
-            LEFT JOIN departments dep ON d.department_id = dep.id
             LEFT JOIN document_permissions dp ON d.id = dp.document_id
             LEFT JOIN roles r ON dp.role_id = r.id
             LEFT JOIN users u ON dp.user_id = u.id
@@ -623,7 +620,7 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
                   OR (r.name = %s AND %s = FALSE)
                   OR u.user_id = %s
               )
-            GROUP BY d.id, dep.name;
+            GROUP BY d.id;
             """
             is_fee_collector = current_user.user_id.startswith("U_FC_") or current_user.user_id.startswith("FC-")
             cur.execute(query, (
@@ -644,13 +641,13 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
             "filename": row[1],
             "source_type": row[2],
             "tenant_id": row[3],
-            "department": row[4],
-            "sensitivity": row[5],
-            "status": row[6],
-            "chunk_count": row[7],
-            "file_size": row[8],
-            "content_hash": row[9],
-            "created_at": str(row[10]) if row[10] else None
+            "department": None,
+            "sensitivity": row[4],
+            "status": row[5],
+            "chunk_count": row[6],
+            "file_size": row[7],
+            "content_hash": row[8],
+            "created_at": str(row[9]) if row[9] else None
         }
     finally:
         conn.close()
