@@ -52,3 +52,31 @@ class DocumentPermissionGrantRequest(BaseModel):
     target_role: Optional[str] = None
     target_user_id: Optional[str] = None
 
+class ReceiptAssignmentItem(BaseModel):
+    id: int
+    user_id: str
+    user_name: Optional[str] = None
+    receipt_id: str
+    tenant_id: str
+    created_at: Optional[str] = None
+
+class ReceiptAssignmentCreateRequest(BaseModel):
+    user_id: str
+    receipt_id: str
+
+class FacultyAssignmentItem(BaseModel):
+    id: int
+    faculty_user_id: str
+    faculty_name: Optional[str] = None
+    student_user_id: str
+    student_name: Optional[str] = None
+    course_code: Optional[str] = None
+    tenant_id: str
+    created_at: Optional[str] = None
+
+class FacultyAssignmentCreateRequest(BaseModel):
+    faculty_user_id: str
+    student_user_id: str
+    course_code: Optional[str] = None
+
+

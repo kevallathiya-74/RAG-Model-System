@@ -470,19 +470,28 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
         WHERE d.tenant_id = %s
           AND (
               owner.user_id = %s
-              OR (r.name = %s AND %s = FALSE)
               OR u.user_id = %s
+              OR (
+                  r.name = %s
+                  -- Faculty cannot access financial documents
+                  AND NOT (%s = 'faculty' AND (d.filename ILIKE '%%fee_ledger%%' OR d.filename ILIKE '%%finance_summary%%' OR d.filename ILIKE '%%receipt%%'))
+                  -- Students cannot access financial documents
+                  AND NOT (%s = 'student' AND (d.filename ILIKE '%%fee_ledger%%' OR d.filename ILIKE '%%finance_summary%%' OR d.filename ILIKE '%%receipt%%'))
+                  -- Finance managers cannot access academic teaching records
+                  AND NOT (%s = 'finance_manager' AND (d.filename ILIKE '%%syllabus%%' OR d.filename ILIKE '%%teaching%%' OR d.filename ILIKE '%%curriculum%%'))
+              )
           )
         GROUP BY d.id
         ORDER BY d.created_at DESC;
         """
-        is_fee_collector = current_user.user_id.startswith("U_FC_") or current_user.user_id.startswith("FC-")
         cur.execute(query, (
             current_user.tenant_id,
             current_user.user_id,
+            current_user.user_id,
             current_user.role,
-            is_fee_collector,
-            current_user.user_id
+            current_user.role,
+            current_user.role,
+            current_user.role
         ))
         docs = [
             {
@@ -497,8 +506,7 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
             for r in cur.fetchall()
         ]
 
-        # Also retrieve accessible images enforcing owner, role, and user ACLs
-        is_fee_collector = current_user.user_id.startswith("U_FC_") or current_user.user_id.startswith("FC-")
+        # Also retrieve accessible images enforcing owner, role, user ACLs, and receipt assignments
         if check_table_exists(cur, "image_permissions"):
             img_query = """
             SELECT 
@@ -511,8 +519,25 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
             WHERE i.tenant_id = %s
               AND (
                   owner.user_id = %s
-                  OR (r.name = %s AND %s = FALSE)
                   OR u.user_id = %s
+                  OR (
+                      -- Finance manager can access receipts assigned in fee_collector_assignments
+                      %s = 'finance_manager'
+                      AND EXISTS (
+                          SELECT 1 FROM fee_collector_assignments fca
+                          JOIN users fcu ON fca.user_id = fcu.id
+                          WHERE fcu.user_id = %s AND fca.tenant_id = %s
+                            AND (i.filename ILIKE '%%' || fca.receipt_id || '%%' OR i.image_id ILIKE '%%' || fca.receipt_id || '%%')
+                      )
+                  )
+                  OR (
+                      r.name = %s
+                      -- Role grant cannot be used to bypass receipt assignment for finance manager on receipt images
+                      AND NOT (%s = 'finance_manager' AND i.filename ILIKE '%%receipt%%')
+                      -- Faculty and student cannot access receipt images via role grant
+                      AND NOT (%s = 'faculty' AND i.filename ILIKE '%%receipt%%')
+                      AND NOT (%s = 'student' AND i.filename ILIKE '%%receipt%%')
+                  )
               )
             GROUP BY i.id
             ORDER BY i.created_at DESC;
@@ -520,12 +545,17 @@ def get_authorized_documents(current_user: AuthenticatedUser) -> List[Dict[str, 
             cur.execute(img_query, (
                 current_user.tenant_id,
                 current_user.user_id,
+                current_user.user_id,
                 current_user.role,
-                is_fee_collector,
-                current_user.user_id
+                current_user.user_id,
+                current_user.tenant_id,
+                current_user.role,
+                current_user.role,
+                current_user.role,
+                current_user.role
             ))
         else:
-            # Fallback when image_permissions is pending migration 004: strictly deny-by-default for non-owners
+            # Fallback when image_permissions is pending: strictly deny-by-default for non-owners
             img_query = """
             SELECT 
                 i.image_id, i.filename, i.source_type, i.tenant_id, i.status, i.chunk_count, i.created_at
@@ -560,7 +590,6 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
     cur = conn.cursor()
     try:
         if document_id.startswith("IMG-"):
-            is_fee_collector = current_user.user_id.startswith("U_FC_") or current_user.user_id.startswith("FC-")
             if check_table_exists(cur, "image_permissions"):
                 query = """
                 SELECT 
@@ -574,8 +603,22 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
                 WHERE i.image_id = %s AND i.tenant_id = %s
                   AND (
                       owner.user_id = %s
-                      OR (r.name = %s AND %s = FALSE)
                       OR u.user_id = %s
+                      OR (
+                          %s = 'finance_manager'
+                          AND EXISTS (
+                              SELECT 1 FROM fee_collector_assignments fca
+                              JOIN users fcu ON fca.user_id = fcu.id
+                              WHERE fcu.user_id = %s AND fca.tenant_id = %s
+                                AND (i.filename ILIKE '%%' || fca.receipt_id || '%%' OR i.image_id ILIKE '%%' || fca.receipt_id || '%%')
+                          )
+                      )
+                      OR (
+                          r.name = %s
+                          AND NOT (%s = 'finance_manager' AND i.filename ILIKE '%%receipt%%')
+                          AND NOT (%s = 'faculty' AND i.filename ILIKE '%%receipt%%')
+                          AND NOT (%s = 'student' AND i.filename ILIKE '%%receipt%%')
+                      )
                   )
                 GROUP BY i.id;
                 """
@@ -583,12 +626,16 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
                     document_id,
                     current_user.tenant_id,
                     current_user.user_id,
+                    current_user.user_id,
                     current_user.role,
-                    is_fee_collector,
-                    current_user.user_id
+                    current_user.user_id,
+                    current_user.tenant_id,
+                    current_user.role,
+                    current_user.role,
+                    current_user.role,
+                    current_user.role
                 ))
             else:
-                # Fallback when image_permissions is pending migration 004: strictly deny-by-default for non-owners
                 query = """
                 SELECT 
                     i.image_id, i.filename, i.source_type, i.tenant_id, i.sensitivity,
@@ -617,19 +664,25 @@ def get_authorized_document_by_id(document_id: str, current_user: AuthenticatedU
             WHERE d.document_id = %s AND d.tenant_id = %s
               AND (
                   owner.user_id = %s
-                  OR (r.name = %s AND %s = FALSE)
                   OR u.user_id = %s
+                  OR (
+                      r.name = %s
+                      AND NOT (%s = 'faculty' AND (d.filename ILIKE '%%fee_ledger%%' OR d.filename ILIKE '%%finance_summary%%' OR d.filename ILIKE '%%receipt%%'))
+                      AND NOT (%s = 'student' AND (d.filename ILIKE '%%fee_ledger%%' OR d.filename ILIKE '%%finance_summary%%' OR d.filename ILIKE '%%receipt%%'))
+                      AND NOT (%s = 'finance_manager' AND (d.filename ILIKE '%%syllabus%%' OR d.filename ILIKE '%%teaching%%' OR d.filename ILIKE '%%curriculum%%'))
+                  )
               )
             GROUP BY d.id;
             """
-            is_fee_collector = current_user.user_id.startswith("U_FC_") or current_user.user_id.startswith("FC-")
             cur.execute(query, (
                 document_id,
                 current_user.tenant_id,
                 current_user.user_id,
+                current_user.user_id,
                 current_user.role,
-                is_fee_collector,
-                current_user.user_id
+                current_user.role,
+                current_user.role,
+                current_user.role
             ))
         
         row = cur.fetchone()

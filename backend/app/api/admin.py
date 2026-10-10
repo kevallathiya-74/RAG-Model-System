@@ -17,7 +17,11 @@ from backend.app.schemas.admin import (
     UserStatusUpdateRequest,
     UserRoleUpdateRequest,
     DocumentAdminItem,
-    DocumentPermissionGrantRequest
+    DocumentPermissionGrantRequest,
+    ReceiptAssignmentItem,
+    ReceiptAssignmentCreateRequest,
+    FacultyAssignmentItem,
+    FacultyAssignmentCreateRequest
 )
 from backend.app.services.audit_service import record_audit_event, sanitize_metadata, sanitize_query
 from backend.app.middleware.request_context import get_request_id
@@ -614,4 +618,485 @@ def grant_document_permission(
         return {"status": "success", "document_id": document_id, "granted_role": req.target_role, "granted_user": req.target_user_id}
     finally:
         conn.close()
+
+
+@router.delete(
+    "/documents/{document_id}/permissions",
+    summary="Revoke Document or Image Permission",
+    description="Authorized for admin role only. Revokes role or user permission grant from a document or image.",
+    dependencies=[Depends(rate_limit_admin)]
+)
+def revoke_document_permission(
+    document_id: str,
+    request: Request,
+    target_role: Optional[str] = Query(None, description="Role to revoke permission from"),
+    target_user_id: Optional[str] = Query(None, description="User ID to revoke permission from"),
+    current_user: AuthenticatedUser = Depends(require_admin_user)
+):
+    req_id = get_request_id(request)
+    if not target_role and not target_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must specify either 'target_role' or 'target_user_id'."
+        )
+
+    if target_role and target_role not in settings.CANONICAL_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid target role '{target_role}'. Must be one of: {', '.join(settings.CANONICAL_ROLES)}"
+        )
+
+    is_image = document_id.startswith("IMG-")
+    target_table = "images" if is_image else "documents"
+    id_col = "image_id" if is_image else "document_id"
+    perm_table = "image_permissions" if is_image else "document_permissions"
+    fk_col = "image_id" if is_image else "document_id"
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT id FROM {target_table} WHERE {id_col} = %s AND tenant_id = %s;", (document_id, current_user.tenant_id))
+            doc_row = cur.fetchone()
+            if not doc_row:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Resource '{document_id}' not found.")
+            record_pk = doc_row[0]
+
+            deleted_count = 0
+            if target_role:
+                cur.execute("SELECT id FROM roles WHERE name = %s;", (target_role,))
+                r_row = cur.fetchone()
+                if r_row:
+                    cur.execute(f"DELETE FROM {perm_table} WHERE {fk_col} = %s AND role_id = %s;", (record_pk, r_row[0]))
+                    deleted_count += cur.rowcount
+
+            if target_user_id:
+                cur.execute("SELECT id FROM users WHERE user_id = %s AND tenant_id = %s;", (target_user_id, current_user.tenant_id))
+                u_row = cur.fetchone()
+                if not u_row:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{target_user_id}' not found.")
+                cur.execute(f"DELETE FROM {perm_table} WHERE {fk_col} = %s AND user_id = %s;", (record_pk, u_row[0]))
+                deleted_count += cur.rowcount
+
+        conn.commit()
+
+        record_audit_event(
+            user_id=current_user.user_id,
+            action="admin_revoke_permission",
+            resource_type="image" if is_image else "document",
+            resource_id=document_id,
+            result="authorized",
+            metadata={
+                "revoked_role": target_role,
+                "revoked_user": target_user_id,
+                "deleted_count": deleted_count,
+                "tenant_id": current_user.tenant_id,
+                "request_id": req_id
+            }
+        )
+        return {
+            "status": "success",
+            "document_id": document_id,
+            "revoked_role": target_role,
+            "revoked_user": target_user_id,
+            "deleted_count": deleted_count
+        }
+    finally:
+        conn.close()
+
+
+@router.get(
+    "/receipt-assignments",
+    response_model=List[ReceiptAssignmentItem],
+    summary="List Receipt Assignments",
+    description="Authorized for admin role only. Lists fee collector assignments for the current tenant.",
+    dependencies=[Depends(rate_limit_admin)]
+)
+def list_receipt_assignments(
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user)
+):
+    req_id = get_request_id(request)
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT fca.id, u.user_id, u.name, fca.receipt_id, fca.tenant_id, fca.created_at
+                FROM fee_collector_assignments fca
+                JOIN users u ON fca.user_id = u.id
+                WHERE fca.tenant_id = %s
+                ORDER BY fca.id ASC;
+            """, (current_user.tenant_id,))
+            rows = cur.fetchall()
+
+        items = [
+            ReceiptAssignmentItem(
+                id=r[0],
+                user_id=r[1],
+                user_name=r[2],
+                receipt_id=r[3],
+                tenant_id=r[4],
+                created_at=r[5].isoformat() if hasattr(r[5], "isoformat") else str(r[5])
+            )
+            for r in rows
+        ]
+
+        record_audit_event(
+            user_id=current_user.user_id,
+            action="admin_list_receipt_assignments",
+            resource_type="receipt_assignment",
+            result="authorized",
+            metadata={
+                "returned_count": len(items),
+                "tenant_id": current_user.tenant_id,
+                "request_id": req_id
+            }
+        )
+        return items
+    finally:
+        conn.close()
+
+
+@router.post(
+    "/receipt-assignments",
+    response_model=ReceiptAssignmentItem,
+    summary="Create Receipt Assignment",
+    description="Authorized for admin role only. Assigns a fee receipt to a finance manager within the tenant.",
+    dependencies=[Depends(rate_limit_admin)]
+)
+def create_receipt_assignment(
+    req: ReceiptAssignmentCreateRequest,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user)
+):
+    req_id = get_request_id(request)
+    receipt_id = req.receipt_id.strip()
+    target_user_id = req.user_id.strip()
+
+    if not receipt_id or not target_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Fields 'user_id' and 'receipt_id' must be non-empty."
+        )
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT u.id, u.name, r.name 
+                FROM users u
+                JOIN roles r ON u.role_id = r.id
+                WHERE u.user_id = %s AND u.tenant_id = %s;
+            """, (target_user_id, current_user.tenant_id))
+            u_row = cur.fetchone()
+            if not u_row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"User '{target_user_id}' not found in this tenant."
+                )
+            u_pk, u_name, u_role = u_row
+            if u_role != "finance_manager":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"User '{target_user_id}' has role '{u_role}'. Receipt assignments require 'finance_manager' role."
+                )
+
+            cur.execute("""
+                INSERT INTO fee_collector_assignments (user_id, receipt_id, tenant_id)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (user_id, receipt_id) DO UPDATE SET tenant_id = EXCLUDED.tenant_id
+                RETURNING id, created_at;
+            """, (u_pk, receipt_id, current_user.tenant_id))
+            assign_id, created_at = cur.fetchone()
+        conn.commit()
+
+        record_audit_event(
+            user_id=current_user.user_id,
+            action="admin_assign_receipt",
+            resource_type="receipt_assignment",
+            resource_id=receipt_id,
+            result="authorized",
+            metadata={
+                "assigned_to_user_id": target_user_id,
+                "tenant_id": current_user.tenant_id,
+                "request_id": req_id
+            }
+        )
+
+        return ReceiptAssignmentItem(
+            id=assign_id,
+            user_id=target_user_id,
+            user_name=u_name,
+            receipt_id=receipt_id,
+            tenant_id=current_user.tenant_id,
+            created_at=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+        )
+    finally:
+        conn.close()
+
+
+@router.delete(
+    "/receipt-assignments/{target_user_id}/{receipt_id}",
+    summary="Revoke Receipt Assignment",
+    description="Authorized for admin role only. Revokes a fee receipt assignment from a finance manager.",
+    dependencies=[Depends(rate_limit_admin)]
+)
+def delete_receipt_assignment(
+    target_user_id: str,
+    receipt_id: str,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user)
+):
+    req_id = get_request_id(request)
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM fee_collector_assignments fca
+                USING users u
+                WHERE fca.user_id = u.id
+                  AND u.user_id = %s
+                  AND fca.receipt_id = %s
+                  AND fca.tenant_id = %s
+                RETURNING fca.id;
+            """, (target_user_id, receipt_id, current_user.tenant_id))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Assignment for user '{target_user_id}' and receipt '{receipt_id}' not found."
+                )
+        conn.commit()
+
+        record_audit_event(
+            user_id=current_user.user_id,
+            action="admin_revoke_receipt_assignment",
+            resource_type="receipt_assignment",
+            resource_id=receipt_id,
+            result="authorized",
+            metadata={
+                "revoked_from_user_id": target_user_id,
+                "tenant_id": current_user.tenant_id,
+                "request_id": req_id
+            }
+        )
+        return {"status": "success", "user_id": target_user_id, "receipt_id": receipt_id}
+    finally:
+        conn.close()
+
+
+@router.get(
+    "/faculty-assignments",
+    response_model=List[FacultyAssignmentItem],
+    summary="List Faculty Student Assignments",
+    description="Authorized for admin role only. Lists faculty supervision and course assignments for the current tenant.",
+    dependencies=[Depends(rate_limit_admin)]
+)
+def list_faculty_assignments(
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user)
+):
+    req_id = get_request_id(request)
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT fsa.id, fac.user_id, fac.name, stu.user_id, stu.name, fsa.course_code, fsa.tenant_id, fsa.created_at
+                FROM faculty_student_assignments fsa
+                JOIN users fac ON fsa.faculty_user_id = fac.id
+                JOIN users stu ON fsa.student_user_id = stu.id
+                WHERE fsa.tenant_id = %s
+                ORDER BY fsa.id ASC;
+            """, (current_user.tenant_id,))
+            rows = cur.fetchall()
+
+        items = [
+            FacultyAssignmentItem(
+                id=r[0],
+                faculty_user_id=r[1],
+                faculty_name=r[2],
+                student_user_id=r[3],
+                student_name=r[4],
+                course_code=r[5],
+                tenant_id=r[6],
+                created_at=r[7].isoformat() if hasattr(r[7], "isoformat") else str(r[7])
+            )
+            for r in rows
+        ]
+
+        record_audit_event(
+            user_id=current_user.user_id,
+            action="admin_list_faculty_assignments",
+            resource_type="faculty_assignment",
+            result="authorized",
+            metadata={
+                "returned_count": len(items),
+                "tenant_id": current_user.tenant_id,
+                "request_id": req_id
+            }
+        )
+        return items
+    finally:
+        conn.close()
+
+
+@router.post(
+    "/faculty-assignments",
+    response_model=FacultyAssignmentItem,
+    summary="Create Faculty Student Assignment",
+    description="Authorized for admin role only. Links a faculty member to a student within the tenant.",
+    dependencies=[Depends(rate_limit_admin)]
+)
+def create_faculty_assignment(
+    req: FacultyAssignmentCreateRequest,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user)
+):
+    req_id = get_request_id(request)
+    faculty_user_id = req.faculty_user_id.strip()
+    student_user_id = req.student_user_id.strip()
+    course_code = req.course_code.strip() if req.course_code else None
+
+    if not faculty_user_id or not student_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Fields 'faculty_user_id' and 'student_user_id' must be non-empty."
+        )
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            # Validate faculty
+            cur.execute("""
+                SELECT u.id, u.name, r.name 
+                FROM users u
+                JOIN roles r ON u.role_id = r.id
+                WHERE u.user_id = %s AND u.tenant_id = %s;
+            """, (faculty_user_id, current_user.tenant_id))
+            fac_row = cur.fetchone()
+            if not fac_row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Faculty user '{faculty_user_id}' not found in this tenant."
+                )
+            fac_pk, fac_name, fac_role = fac_row
+            if fac_role != "faculty":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"User '{faculty_user_id}' has role '{fac_role}'. Expected 'faculty'."
+                )
+
+            # Validate student
+            cur.execute("""
+                SELECT u.id, u.name, r.name 
+                FROM users u
+                JOIN roles r ON u.role_id = r.id
+                WHERE u.user_id = %s AND u.tenant_id = %s;
+            """, (student_user_id, current_user.tenant_id))
+            stu_row = cur.fetchone()
+            if not stu_row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Student user '{student_user_id}' not found in this tenant."
+                )
+            stu_pk, stu_name, stu_role = stu_row
+            if stu_role != "student":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"User '{student_user_id}' has role '{stu_role}'. Expected 'student'."
+                )
+
+            # Insert assignment
+            cur.execute("""
+                INSERT INTO faculty_student_assignments (faculty_user_id, student_user_id, course_code, tenant_id)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (faculty_user_id, student_user_id, tenant_id) DO UPDATE SET course_code = EXCLUDED.course_code
+                RETURNING id, created_at;
+            """, (fac_pk, stu_pk, course_code, current_user.tenant_id))
+            assign_id, created_at = cur.fetchone()
+        conn.commit()
+
+        record_audit_event(
+            user_id=current_user.user_id,
+            action="admin_assign_faculty_student",
+            resource_type="faculty_assignment",
+            resource_id=f"{faculty_user_id}:{student_user_id}",
+            result="authorized",
+            metadata={
+                "faculty_user_id": faculty_user_id,
+                "student_user_id": student_user_id,
+                "course_code": course_code,
+                "tenant_id": current_user.tenant_id,
+                "request_id": req_id
+            }
+        )
+
+        return FacultyAssignmentItem(
+            id=assign_id,
+            faculty_user_id=faculty_user_id,
+            faculty_name=fac_name,
+            student_user_id=student_user_id,
+            student_name=stu_name,
+            course_code=course_code,
+            tenant_id=current_user.tenant_id,
+            created_at=created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+        )
+    finally:
+        conn.close()
+
+
+@router.delete(
+    "/faculty-assignments/{faculty_user_id}/{student_user_id}",
+    summary="Revoke Faculty Student Assignment",
+    description="Authorized for admin role only. Removes faculty supervision or course assignment for a student.",
+    dependencies=[Depends(rate_limit_admin)]
+)
+def delete_faculty_assignment(
+    faculty_user_id: str,
+    student_user_id: str,
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_admin_user)
+):
+    req_id = get_request_id(request)
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                DELETE FROM faculty_student_assignments fsa
+                USING users fac, users stu
+                WHERE fsa.faculty_user_id = fac.id
+                  AND fsa.student_user_id = stu.id
+                  AND fac.user_id = %s
+                  AND stu.user_id = %s
+                  AND fsa.tenant_id = %s
+                RETURNING fsa.id;
+            """, (faculty_user_id, student_user_id, current_user.tenant_id))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Assignment between faculty '{faculty_user_id}' and student '{student_user_id}' not found."
+                )
+        conn.commit()
+
+        record_audit_event(
+            user_id=current_user.user_id,
+            action="admin_revoke_faculty_student_assignment",
+            resource_type="faculty_assignment",
+            resource_id=f"{faculty_user_id}:{student_user_id}",
+            result="authorized",
+            metadata={
+                "faculty_user_id": faculty_user_id,
+                "student_user_id": student_user_id,
+                "tenant_id": current_user.tenant_id,
+                "request_id": req_id
+            }
+        )
+        return {
+            "status": "success",
+            "faculty_user_id": faculty_user_id,
+            "student_user_id": student_user_id
+        }
+    finally:
+        conn.close()
+
 

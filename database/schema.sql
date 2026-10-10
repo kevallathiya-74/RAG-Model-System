@@ -81,6 +81,16 @@ CREATE TABLE IF NOT EXISTS fee_collector_assignments (
     CONSTRAINT uq_user_receipt UNIQUE (user_id, receipt_id)
 );
 
+CREATE TABLE IF NOT EXISTS faculty_student_assignments (
+    id SERIAL PRIMARY KEY,
+    faculty_user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    student_user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    course_code VARCHAR(50),
+    tenant_id VARCHAR(50) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_faculty_student_tenant UNIQUE (faculty_user_id, student_user_id, tenant_id)
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
     id SERIAL PRIMARY KEY,
     user_id VARCHAR(50) NOT NULL,
@@ -109,6 +119,10 @@ CREATE INDEX IF NOT EXISTS idx_fc_assign_user ON fee_collector_assignments(user_
 CREATE INDEX IF NOT EXISTS idx_fc_assign_receipt ON fee_collector_assignments(receipt_id);
 CREATE INDEX IF NOT EXISTS idx_fc_assign_tenant ON fee_collector_assignments(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_fc_assign_user_tenant ON fee_collector_assignments(user_id, tenant_id);
+
+-- Faculty Student Assignments Indexes
+CREATE INDEX IF NOT EXISTS idx_fsa_faculty_tenant ON faculty_student_assignments(faculty_user_id, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_fsa_student_tenant ON faculty_student_assignments(student_user_id, tenant_id);
 
 -- Documents Indexes
 CREATE INDEX IF NOT EXISTS idx_documents_doc_id ON documents(document_id);
